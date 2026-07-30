@@ -1,0 +1,5 @@
+Digital writing tools have become a routine part of university study. However, many tools focus on correcting a finished text rather than helping writers notice their own process and recurring structural choices. A visual account of writing patterns may support reflection without presenting one form of writing as universally correct.
+
+This prototype therefore treats sentence and paragraph length as visible traces of composition. In addition, it counts a small, explicit list of academic transitions. These measurements do not explain a writer's intentions; nevertheless, they can provide useful starting points for questions about rhythm, emphasis, and connections between ideas.
+
+The design prioritizes interpretability and local processing. Consequently, every displayed observation can be traced to a simple count or rule. The prototype offers no grade, correction, or generated prose. Instead, students remain responsible for interpreting whether the visible patterns fit their communicative goals.
