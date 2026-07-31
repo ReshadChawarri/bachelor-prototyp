@@ -1,5 +1,23 @@
-Digital writing tools have become a routine part of university study. However, many tools focus on correcting a finished text rather than helping writers notice their own process and recurring structural choices. A visual account of writing patterns may support reflection without presenting one form of writing as universally correct.
+Abstract
 
-This prototype therefore treats sentence and paragraph length as visible traces of composition. In addition, it counts a small, explicit list of academic transitions. These measurements do not explain a writer's intentions; nevertheless, they can provide useful starting points for questions about rhythm, emphasis, and connections between ideas.
+Academic writing often develops ideas through a sequence of claims, evidence, and interpretation. However, students may not always notice how their sentence rhythm shapes the reader's experience. This prototype explores how visual summaries can make writing patterns easier to inspect.
 
-The design prioritizes interpretability and local processing. Consequently, every displayed observation can be traced to a simple count or rule. The prototype offers no grade, correction, or generated prose. Instead, students remain responsible for interpreting whether the visible patterns fit their communicative goals.
+Introduction
+
+Students frequently revise academic texts by focusing on grammar, citations, or formal requirements. In contrast, they may spend less time observing the structure of their own writing behavior. Therefore, a visualization interface can support reflection by showing sentence length, paragraph length, transition words, and section distribution in a descriptive way.
+
+Methodology
+
+The prototype uses local preprocessing rules to split the text into paragraphs and sentences. It then calculates word counts, sentence lengths, paragraph lengths, and explicit transition words from a predefined academic list. For example, transitions such as however, therefore, and in addition are counted because they make relationships between ideas visible.
+
+Results
+
+The visual overview makes several patterns visible. First, sentence lengths differ across the sample text. Second, paragraph length varies between compact introductory passages and more detailed methodological description. As a result, the dashboard provides multiple entry points for reflection without assigning a score.
+
+Discussion
+
+The interface is intended to encourage interpretation rather than correction. On the other hand, simple rule-based analysis has limitations because headings, abbreviations, and formatting conventions can vary across academic texts. Nevertheless, transparent rules make it easier for students to understand what the prototype detects.
+
+Conclusion
+
+In conclusion, the Writing Pattern Visualizer shows how descriptive metrics, charts, highlighted text, and reflection prompts can support exploration of individual academic writing patterns. Finally, future iterations could add richer interaction while keeping the analysis local and interpretable.

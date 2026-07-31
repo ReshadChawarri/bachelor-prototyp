@@ -1,4 +1,4 @@
-"""Streamlit entry point for the Writing Pattern Visualizer MVP."""
+"""Streamlit entry point for the Writing Pattern Visualizer V2 prototype."""
 
 from __future__ import annotations
 
@@ -6,48 +6,132 @@ from pathlib import Path
 
 import streamlit as st
 
-from src.feature_extraction import extract_features
-from src.reflection_prompts import PARAGRAPHS, PROMPTS, SENTENCES, TRANSITIONS
+from src.feature_extraction import TRANSITION_WORDS, extract_features
+from src.reflection_prompts import (
+    GENERAL_PROMPTS,
+    HIGHLIGHTING_PROMPTS,
+    PARAGRAPH_PROMPTS,
+    SECTION_PROMPTS,
+    SENTENCE_PROMPTS,
+    TRANSITION_PROMPTS,
+    show_prompts,
+)
+from src.section_detection import detect_sections
+from src.text_highlighting import (
+    LONG_SENTENCE_LIMIT,
+    SHORT_SENTENCE_LIMIT,
+    highlighted_text_html,
+)
 from src.visualizations import (
     longest_sentences_table,
     paragraph_length_figure,
+    section_length_figure,
+    section_table,
     sentence_length_figure,
     show_overview,
     transition_figure,
+    transition_table,
 )
 from src.writing_profile import generate_profile
 
-st.set_page_config(page_title="Writing Pattern Visualizer", page_icon="✦", layout="wide")
+
+PROJECT_DIR = Path(__file__).parent
+SAMPLE_PATH = PROJECT_DIR / "sample_texts" / "example_academic_text.txt"
+
+
+st.set_page_config(page_title="Writing Pattern Visualizer", page_icon="W", layout="wide")
+
+
+def read_uploaded_file(uploaded_file) -> str:
+    """Read plain-text uploads with a small fallback for common text encodings."""
+    try:
+        return uploaded_file.getvalue().decode("utf-8")
+    except UnicodeDecodeError:
+        return uploaded_file.getvalue().decode("latin-1")
+
+
+def show_highlight_legend() -> None:
+    """Render a compact legend for the highlighted text view."""
+    st.markdown(
+        """
+        <style>
+        .legend-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            margin: 0.25rem 0 1rem;
+        }
+        .legend-chip {
+            border-radius: 6px;
+            border: 1px solid #d9dee7;
+            padding: 0.35rem 0.55rem;
+            font-size: 0.92rem;
+        }
+        .legend-transition {
+            background: #dff3e6;
+            border-color: #9ed2b0;
+        }
+        .legend-short {
+            background: #e8f2ff;
+            border-bottom: 2px solid #5d8fd6;
+        }
+        .legend-long {
+            background: #fff1d9;
+            border-bottom: 2px solid #c98922;
+        }
+        </style>
+        <div class="legend-row">
+            <span class="legend-chip legend-transition">transition words</span>
+            <span class="legend-chip legend-short">very short sentences</span>
+            <span class="legend-chip legend-long">very long sentences</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+with st.sidebar:
+    st.header("Prototype V2")
+    st.write("Reflection dashboard for exploring academic writing patterns.")
+    st.divider()
+    st.markdown("**Local analysis**")
+    st.write("No external APIs, language models, grading, or automatic correction.")
+    st.markdown("**Highlight thresholds**")
+    st.write(f"Very short sentences: fewer than {SHORT_SENTENCE_LIMIT} words.")
+    st.write(f"Very long sentences: more than {LONG_SENTENCE_LIMIT} words.")
+
 
 st.title("Writing Pattern Visualizer")
-st.caption("An interactive view of patterns in your academic writing")
+st.caption("Version 2 MVP prototype for academic writing reflection")
 
 st.header("Introduction")
 st.write(
-    "Explore how sentence length, paragraph structure, and transition words shape "
-    "your text. The results are descriptive starting points for reflection—not a "
-    "grade, correction, or quality score. All analysis runs locally."
+    "This prototype helps students explore visible patterns in academic writing through "
+    "local, deterministic, and interpretable visualizations. It does not generate text, "
+    "grade writing, or correct the uploaded document."
 )
 
+
 st.header("Upload Academic Text")
+st.write(
+    "Upload a `.txt` file, or use the included sample text to test the reflection dashboard "
+    "without preparing a file."
+)
 input_method = st.radio(
-    "Choose a text source",
-    ("Upload a .txt file", "Use sample text"),
+    "Text source",
+    ("Use sample text", "Upload a .txt file"),
     horizontal=True,
 )
 
 text: str | None = None
 if input_method == "Upload a .txt file":
-    uploaded_file = st.file_uploader("Select a UTF-8 plain-text file", type=["txt"])
+    uploaded_file = st.file_uploader("Choose an academic text file", type=["txt"])
     if uploaded_file is not None:
-        try:
-            text = uploaded_file.getvalue().decode("utf-8")
-        except UnicodeDecodeError:
-            st.error("This file is not UTF-8 encoded. Save it as UTF-8 and try again.")
+        text = read_uploaded_file(uploaded_file)
+        st.caption(f"Selected file: {uploaded_file.name}")
 else:
-    sample_path = Path(__file__).parent / "sample_texts" / "example_academic_text.txt"
-    text = sample_path.read_text(encoding="utf-8")
-    st.success("The included academic sample is ready to explore.")
+    text = SAMPLE_PATH.read_text(encoding="utf-8")
+    st.caption("Using the included academic sample text.")
 
 if text is None:
     st.info("Upload a text file or choose the sample text to display the analysis.")
@@ -56,50 +140,107 @@ if not text.strip():
     st.warning("The selected file is empty. Please choose a file containing text.")
     st.stop()
 
+
 features = extract_features(text)
+sections = detect_sections(text)
+profile = generate_profile(features, sections)
+
 
 st.header("Writing Overview")
-st.write("These cards summarize the size and basic structure of the selected text.")
-show_overview(features)
+st.write(
+    "These metrics provide a first overview of the text structure. They are descriptive "
+    "and should be used as starting points for reflection."
+)
+show_overview(features, section_count=len(sections))
+
 
 st.header("Sentence Structure")
 st.write(
-    "The distribution groups sentences by their word count. It reveals whether "
-    "the text relies on similar sentence lengths or uses a wider range."
+    "The sentence length distribution shows how often sentences of different lengths appear. "
+    "The dotted reference lines mark the thresholds used later for text highlighting."
 )
 st.plotly_chart(sentence_length_figure(features), use_container_width=True)
-st.info(f"Reflection: {SENTENCES}", icon="💭")
-with st.expander("Show the five longest sentences"):
+with st.expander("View the five longest detected sentences"):
     st.dataframe(longest_sentences_table(features), hide_index=True, use_container_width=True)
+show_prompts(SENTENCE_PROMPTS)
+
 
 st.header("Paragraph Structure")
 st.write(
-    "Each bar represents one paragraph in reading order. Its height is the number "
-    "of words in that paragraph."
+    "The paragraph chart shows the number of words in each detected content paragraph. "
+    "It can reveal whether the text moves through similarly sized blocks or alternates "
+    "between compact and extended paragraphs."
 )
 st.plotly_chart(paragraph_length_figure(features), use_container_width=True)
-st.info(f"Reflection: {PARAGRAPHS}", icon="💭")
+show_prompts(PARAGRAPH_PROMPTS)
+
 
 st.header("Transition Words")
 st.write(
-    "This chart counts selected academic transitions. It shows explicit links "
-    "between ideas, but does not judge whether more or fewer are needed."
+    "This view counts explicit academic transition words and phrases from a predefined local list. "
+    "The list is transparent and can be edited in the code."
 )
-transition_chart = transition_figure(features)
-if transition_chart is None:
-    st.info("No terms from the predefined transition-word list were found.")
+st.metric("Detected transition words", features.transition_count)
+if features.transition_frequencies:
+    st.dataframe(transition_table(features).head(10), hide_index=True, use_container_width=True)
+    st.plotly_chart(transition_figure(features), use_container_width=True)
 else:
-    st.plotly_chart(transition_chart, use_container_width=True)
-st.info(f"Reflection: {TRANSITIONS}", icon="💭")
+    st.info(
+        "No transition words from the predefined list were detected. This does not indicate "
+        "a problem; it only means the current local list did not match explicit transitions "
+        "in the text."
+    )
+with st.expander("View predefined transition list"):
+    st.write(", ".join(TRANSITION_WORDS))
+show_prompts(TRANSITION_PROMPTS)
+
+
+st.header("Section Structure")
+st.write(
+    "This section uses simple line-based heading detection for common academic headings such as "
+    "Abstract, Introduction, Methodology, Results, Discussion, and Conclusion."
+)
+if sections:
+    st.dataframe(section_table(sections), hide_index=True, use_container_width=True)
+    st.plotly_chart(section_length_figure(sections), use_container_width=True)
+else:
+    st.info(
+        "No clear academic section headings were detected. This may be due to the text format "
+        "or because the text does not use explicit headings."
+    )
+show_prompts(SECTION_PROMPTS)
+
+
+st.header("Text Highlighting")
+st.write(
+    "The highlighted view connects the visual summaries back to the text. Highlighting supports "
+    "exploration and does not mark errors."
+)
+show_highlight_legend()
+with st.expander("View highlighted text", expanded=True):
+    st.markdown(highlighted_text_html(text), unsafe_allow_html=True)
+show_prompts(HIGHLIGHTING_PROMPTS)
+
 
 st.header("Personal Writing Profile")
-st.write("This rule-based summary describes visible tendencies without evaluating them.")
-for observation in generate_profile(features):
+st.write(
+    "The profile summarizes observed tendencies with rule-based statements. It is descriptive, "
+    "not evaluative."
+)
+for observation in profile:
     st.markdown(f"- {observation}")
 
+
 st.header("Reflection Questions")
-for prompt in PROMPTS:
+st.write(
+    "Use these questions to connect the visual patterns to your own writing process and intentions."
+)
+for prompt in GENERAL_PROMPTS:
     st.markdown(f"- {prompt}")
 
+
 with st.expander("View analyzed text"):
+    st.write(f"Paragraphs detected: {features.paragraph_count}")
+    st.write(f"Sentences detected: {features.sentence_count}")
+    st.write(f"Words detected: {features.word_count}")
     st.text(text)
