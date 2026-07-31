@@ -6,23 +6,34 @@ from collections import Counter
 from dataclasses import dataclass
 import re
 
-from .preprocessing import count_words, split_paragraphs, split_sentences
+from .preprocessing import content_paragraphs, count_words, split_sentences
 
 
 TRANSITION_WORDS = (
     "additionally",
     "although",
+    "as a result",
+    "because",
     "consequently",
+    "finally",
+    "first",
     "for example",
     "for instance",
     "furthermore",
     "hence",
     "however",
+    "in addition",
+    "in conclusion",
     "in contrast",
+    "in summary",
     "moreover",
     "nevertheless",
+    "on the other hand",
+    "second",
+    "similarly",
     "therefore",
     "thus",
+    "whereas",
 )
 
 
@@ -38,6 +49,10 @@ class TextFeatures:
     transition_frequencies: dict[str, int]
     sentences: list[str]
 
+    @property
+    def transition_count(self) -> int:
+        return sum(self.transition_frequencies.values())
+
 
 def _transition_counts(text: str) -> dict[str, int]:
     lowered = text.casefold()
@@ -52,8 +67,12 @@ def _transition_counts(text: str) -> dict[str, int]:
 
 def extract_features(text: str) -> TextFeatures:
     """Calculate the complete, rule-based feature set for *text*."""
-    sentences = split_sentences(text)
-    paragraphs = split_paragraphs(text)
+    paragraphs = content_paragraphs(text)
+    sentences = [
+        sentence
+        for paragraph in paragraphs
+        for sentence in split_sentences(paragraph)
+    ]
     sentence_lengths = [count_words(sentence) for sentence in sentences]
     paragraph_lengths = [count_words(paragraph) for paragraph in paragraphs]
     word_count = count_words(text)

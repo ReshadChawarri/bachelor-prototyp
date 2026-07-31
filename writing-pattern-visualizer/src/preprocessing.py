@@ -28,3 +28,14 @@ def words(text: str) -> list[str]:
 def count_words(text: str) -> int:
     """Count word-like tokens in *text*."""
     return len(words(text))
+
+
+def is_probable_heading(text: str) -> bool:
+    """Detect short heading-like blocks so they do not skew paragraph metrics."""
+    cleaned = re.sub(r"\s+", " ", text.strip())
+    return 0 < count_words(cleaned) <= 6 and not re.search(r"[.!?]", cleaned)
+
+
+def content_paragraphs(text: str) -> list[str]:
+    """Return paragraphs that appear to contain prose rather than only headings."""
+    return [paragraph for paragraph in split_paragraphs(text) if not is_probable_heading(paragraph)]
