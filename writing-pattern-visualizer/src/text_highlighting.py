@@ -5,7 +5,7 @@ from __future__ import annotations
 import html
 import re
 
-from .feature_extraction import TRANSITION_WORDS
+from .feature_extraction import transition_terms_for_language
 from .preprocessing import count_words, split_paragraphs, split_sentences
 from .section_detection import is_academic_heading
 
@@ -13,33 +13,32 @@ from .section_detection import is_academic_heading
 SHORT_SENTENCE_LIMIT = 8
 LONG_SENTENCE_LIMIT = 30
 
-_TRANSITION_PATTERN = re.compile(
-    r"(?<![\w-])("
-    + "|".join(re.escape(term) for term in sorted(TRANSITION_WORDS, key=len, reverse=True))
-    + r")(?![\w-])",
-    flags=re.IGNORECASE,
-)
 
-
-def highlighted_text_html(text: str) -> str:
+def highlighted_text_html(text: str, language: str = "English") -> str:
     """Return a scrollable HTML block with descriptive highlights."""
     blocks: list[str] = []
     for paragraph in split_paragraphs(text):
-        if is_academic_heading(paragraph):
+        if is_academic_heading(paragraph, language):
             blocks.append(f'<p class="highlight-heading">{html.escape(paragraph)}</p>')
             continue
 
-        sentences = [highlight_sentence(sentence) for sentence in split_sentences(paragraph)]
+        sentences = [
+            highlight_sentence(sentence, language)
+            for sentence in split_sentences(paragraph)
+        ]
         if sentences:
             blocks.append(f'<p class="highlight-paragraph">{" ".join(sentences)}</p>')
+
+    if not blocks:
+        blocks.append('<p class="highlight-paragraph">No text available for highlighting.</p>')
 
     return HIGHLIGHT_STYLE + '<div class="highlight-box">' + "\n".join(blocks) + "</div>"
 
 
-def highlight_sentence(sentence: str) -> str:
-    """Highlight one sentence based on length and transition-word matches."""
+def highlight_sentence(sentence: str, language: str = "English") -> str:
+    """Highlight one sentence based on length and transition-marker matches."""
     escaped = html.escape(sentence)
-    with_transitions = _TRANSITION_PATTERN.sub(
+    with_transitions = transition_pattern(language).sub(
         r'<span class="transition-word">\1</span>',
         escaped,
     )
@@ -50,6 +49,19 @@ def highlight_sentence(sentence: str) -> str:
     if word_count > LONG_SENTENCE_LIMIT:
         return f'<span class="long-sentence">{with_transitions}</span>'
     return with_transitions
+
+
+def transition_pattern(language: str) -> re.Pattern[str]:
+    """Build a language-aware transition pattern, preferring longer phrases."""
+    terms = sorted(transition_terms_for_language(language), key=len, reverse=True)
+    phrase_patterns = [
+        r"\s+".join(re.escape(part) for part in term.split())
+        for term in terms
+    ]
+    return re.compile(
+        r"(?<![\w-])(" + "|".join(phrase_patterns) + r")(?![\w-])",
+        flags=re.IGNORECASE,
+    )
 
 
 HIGHLIGHT_STYLE = """
@@ -66,6 +78,9 @@ HIGHLIGHT_STYLE = """
     margin: 1.1rem 0 0.35rem;
     font-weight: 700;
     color: #263445;
+    background: #f0ecff;
+    border-left: 4px solid #7b61ff;
+    padding: 0.25rem 0.5rem;
 }
 .highlight-paragraph {
     margin: 0 0 1rem;

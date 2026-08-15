@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import re
 
 
@@ -36,6 +38,13 @@ def is_probable_heading(text: str) -> bool:
     return 0 < count_words(cleaned) <= 6 and not re.search(r"[.!?]", cleaned)
 
 
-def content_paragraphs(text: str) -> list[str]:
-    """Return paragraphs that appear to contain prose rather than only headings."""
-    return [paragraph for paragraph in split_paragraphs(text) if not is_probable_heading(paragraph)]
+def content_paragraphs(
+    text: str,
+    heading_detector: Callable[[str], bool] | None = None,
+) -> list[str]:
+    """Return prose paragraphs, optionally excluding detected section headings."""
+    return [
+        paragraph
+        for paragraph in split_paragraphs(text)
+        if not (heading_detector and heading_detector(paragraph))
+    ]
