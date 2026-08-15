@@ -97,6 +97,23 @@ def transition_figure(features: TextFeatures):
     return figure
 
 
+def transition_category_figure(features: TextFeatures):
+    """Create a category-level transition frequency chart."""
+    if not features.transition_category_frequencies:
+        return None
+    frame = transition_category_table(features)
+    figure = px.bar(
+        frame.sort_values("Frequency", ascending=True),
+        x="Frequency",
+        y="Category",
+        orientation="h",
+        color_discrete_sequence=[MAGENTA],
+        template=TEMPLATE,
+    )
+    figure.update_layout(height=320, margin=dict(l=10, r=10, t=20, b=10))
+    return figure
+
+
 def section_length_figure(sections: list[SectionInfo]):
     """Create a bar chart showing word count per detected section."""
     frame = section_table(sections)
@@ -118,6 +135,17 @@ def transition_table(features: TextFeatures) -> pd.DataFrame:
     return pd.DataFrame(
         sorted(features.transition_frequencies.items(), key=lambda item: (-item[1], item[0])),
         columns=["Transition word or phrase", "Frequency"],
+    )
+
+
+def transition_category_table(features: TextFeatures) -> pd.DataFrame:
+    """Return transition category frequencies in descending order."""
+    return pd.DataFrame(
+        sorted(
+            features.transition_category_frequencies.items(),
+            key=lambda item: (-item[1], item[0]),
+        ),
+        columns=["Category", "Frequency"],
     )
 
 

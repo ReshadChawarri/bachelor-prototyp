@@ -75,3 +75,54 @@ The highlighted text view connects dashboard-level patterns back to the original
 - Add exportable reflection notes.
 - Add support for comparing two drafts of the same text.
 - Test the interface with students and refine explanations based on observed interpretation difficulties.
+
+## Prototype Version 3
+
+Date: 2026-08-15
+
+### Goal Of This Iteration
+
+V3 prepares the prototype as the final evaluation-ready version for a qualitative user study. The interface should allow students to provide a text, run the analysis intentionally, inspect visualizations, connect patterns back to the text, and reflect without feeling judged by the system.
+
+### Implemented Features
+
+- Added three input options: direct text input, `.txt` upload, and optional sample text.
+- Added an explicit `Analyze Text` button to avoid live analysis while users type.
+- Added manual language selection for English and German.
+- Added categorized English and German transition marker lists.
+- Added transition counts by category and individual marker frequencies.
+- Added English and German academic section heading detection.
+- Improved heading detection for numbered headings such as `1 Introduction`, `1.1 Background`, and `2. Methode`.
+- Improved highlighted text view with section heading, transition marker, shorter sentence, and longer sentence highlights.
+- Added language-aware reflection prompts.
+- Updated the writing profile to describe transition category distribution and section heading presence.
+- Added `PROTOTYPE_V3.md` as the evaluation-ready documentation.
+
+### Design Rationale
+
+The explicit analysis button gives participants control and prevents the interface from reacting continuously while they are still composing or pasting text. Manual language selection keeps the system transparent and avoids implying automatic language understanding.
+
+Transition markers are grouped by rhetorical function so users can reflect on types of connections rather than only individual words. Highlighting connects abstract chart values back to concrete text passages while avoiding error-oriented language.
+
+### Technical Notes
+
+- All analysis remains local and rule-based.
+- Transition detection uses predefined English and German dictionaries in `src/feature_extraction.py`.
+- Multi-word transition phrases are matched before shorter phrases to reduce duplicate counting.
+- Section detection uses language-specific heading lists in `src/section_detection.py`.
+- Reflection prompts are selected from language-specific prompt sets in `src/reflection_prompts.py`.
+
+### Limitations
+
+- The prototype still uses plain-text input only.
+- Transition lists are approximate and incomplete.
+- Sentence splitting is heuristic.
+- Section detection depends on explicit heading lines.
+- The prototype does not infer meaning, argument quality, or rhetorical effectiveness.
+
+### Next Steps
+
+- Run qualitative user sessions with students.
+- Observe whether participants understand the language selector and input priority.
+- Collect feedback on chart labels, highlighting colors, and reflection prompts.
+- Decide whether future versions need exportable reflection notes or draft comparison.

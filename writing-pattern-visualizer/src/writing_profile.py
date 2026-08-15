@@ -23,6 +23,13 @@ def generate_profile(features: TextFeatures, sections: list[SectionInfo]) -> lis
 def describe_sentence_tendency(features: TextFeatures) -> str:
     if features.sentence_count == 0:
         return "No sentence-level pattern could be detected yet."
+    long_sentences = sum(1 for length in features.sentence_lengths if length > 30)
+    short_sentences = sum(1 for length in features.sentence_lengths if length < 8)
+
+    if long_sentences >= max(2, features.sentence_count * 0.25):
+        return "The text contains a relatively high number of longer sentences."
+    if short_sentences >= max(2, features.sentence_count * 0.25):
+        return "The text contains a relatively high number of shorter sentences."
     if features.average_sentence_length < 14:
         return "The text tends to use relatively short sentences."
     if features.average_sentence_length > 25:
@@ -64,23 +71,27 @@ def describe_paragraph_variation(features: TextFeatures) -> str:
 
 def describe_transition_usage(features: TextFeatures) -> str:
     if not features.transition_frequencies:
-        return "The text contains no detected transition words from the predefined academic list."
+        return "No transition markers from the predefined list were detected."
 
-    ranked = sorted(features.transition_frequencies.items(), key=lambda item: (-item[1], item[0]))
-    examples = ", ".join(term for term, _ in ranked[:3])
-    if features.transition_count >= max(6, features.paragraph_count * 2):
-        return f"The text uses several explicit transition words from the predefined academic list, including {examples}."
-    return f"The text uses a smaller set of explicit transition words from the predefined academic list, including {examples}."
+    category_count = len(features.transition_category_frequencies)
+    if category_count >= 3:
+        return "Transition markers are distributed across several categories."
+    if category_count == 2:
+        categories = ", ".join(features.transition_category_frequencies)
+        return f"Transition markers appear across two categories: {categories}."
+
+    category = next(iter(features.transition_category_frequencies))
+    return f"The detected transition markers appear mainly in the category {category}."
 
 
 def describe_section_structure(sections: list[SectionInfo]) -> str:
     if not sections:
-        return "No clear academic section headings were detected in the text."
+        return "No explicit academic section headings were detected."
 
     largest_section = max(sections, key=lambda section: section.word_count)
     return (
-        "The detected section structure suggests that the text follows a recognizable "
-        f"academic organization; the largest detected section is {largest_section.title}."
+        "Explicit academic section headings were detected; the longest detected section "
+        f"by word count is {largest_section.title}."
     )
 
 

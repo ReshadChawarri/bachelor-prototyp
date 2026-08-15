@@ -8,28 +8,59 @@ import re
 from .preprocessing import count_words, split_paragraphs
 
 
-SECTION_HEADINGS = (
+ENGLISH_SECTION_HEADINGS = (
     "Abstract",
     "Introduction",
     "Background",
     "Related Work",
+    "Literature Review",
     "Theory",
     "Method",
+    "Methods",
     "Methodology",
-    "Analysis",
+    "Concept",
+    "Design",
+    "Implementation",
+    "Evaluation",
     "Results",
     "Discussion",
     "Conclusion",
     "References",
+    "Bibliography",
+    "Appendix",
 )
 
-_HEADING_LOOKUP = {heading.casefold(): heading for heading in SECTION_HEADINGS}
-_HEADING_PATTERN = re.compile(
-    r"^\s*(?:\d+(?:\.\d+)*\.?\s*)?(?P<title>"
-    + "|".join(re.escape(heading) for heading in sorted(SECTION_HEADINGS, key=len, reverse=True))
-    + r")\s*:?\s*$",
-    flags=re.IGNORECASE,
+GERMAN_SECTION_HEADINGS = (
+    "Kurzfassung",
+    "Abstract",
+    "Einleitung",
+    "Hintergrund",
+    "Verwandte Arbeiten",
+    "Stand der Forschung",
+    "Literaturübersicht",
+    "Theorie",
+    "Methode",
+    "Methoden",
+    "Methodik",
+    "Konzept",
+    "Design",
+    "Implementierung",
+    "Evaluation",
+    "Auswertung",
+    "Ergebnisse",
+    "Diskussion",
+    "Fazit",
+    "Schlussfolgerung",
+    "Zusammenfassung",
+    "Literatur",
+    "Quellen",
+    "Anhang",
 )
+
+SECTION_HEADINGS_BY_LANGUAGE = {
+    "English": ENGLISH_SECTION_HEADINGS,
+    "German": GERMAN_SECTION_HEADINGS,
+}
 
 
 @dataclass(frozen=True)
@@ -40,18 +71,24 @@ class SectionInfo:
     relative_length: float
 
 
-def is_academic_heading(text: str) -> bool:
+def section_headings_for_language(language: str) -> tuple[str, ...]:
+    """Return the selected language's editable academic heading list."""
+    return SECTION_HEADINGS_BY_LANGUAGE.get(language, ENGLISH_SECTION_HEADINGS)
+
+
+def is_academic_heading(text: str, language: str = "English") -> bool:
     """Return whether a text block matches one of the tracked heading names."""
-    return bool(_HEADING_PATTERN.match(text.strip()))
+    return bool(_heading_pattern(language).match(text.strip()))
 
 
-def detect_sections(text: str) -> list[SectionInfo]:
-    """Detect academic sections and summarize their relative size."""
+def detect_sections(text: str, language: str = "English") -> list[SectionInfo]:
+    """Detect academic sections and summarize their approximate size."""
     lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    pattern = _heading_pattern(language)
     headings = [
-        (line_number, _canonical_heading(match.group("title")))
+        (line_number, _canonical_heading(match.group("title"), language))
         for line_number, line in enumerate(lines)
-        if (match := _HEADING_PATTERN.match(line.strip()))
+        if (match := pattern.match(line.strip()))
     ]
 
     if not headings:
@@ -81,5 +118,20 @@ def detect_sections(text: str) -> list[SectionInfo]:
     ]
 
 
-def _canonical_heading(heading: str) -> str:
-    return _HEADING_LOOKUP.get(heading.casefold(), heading.title())
+def _heading_pattern(language: str) -> re.Pattern[str]:
+    alternatives = "|".join(
+        re.escape(heading)
+        for heading in sorted(section_headings_for_language(language), key=len, reverse=True)
+    )
+    return re.compile(
+        rf"^\s*(?:\d+(?:\.\d+)*\.?\s*)?(?P<title>{alternatives})\s*:?\s*$",
+        flags=re.IGNORECASE,
+    )
+
+
+def _canonical_heading(heading: str, language: str) -> str:
+    lookup = {
+        known_heading.casefold(): known_heading
+        for known_heading in section_headings_for_language(language)
+    }
+    return lookup.get(heading.casefold(), heading.title())

@@ -1,8 +1,8 @@
 # Writing Pattern Visualizer
 
-Version 2 MVP prototype for an HCI / Information Visualization bachelor thesis.
+Version 3 evaluation-ready prototype for an HCI / Information Visualization bachelor thesis.
 
-The app helps students upload an academic `.txt` file and explore interpretable writing patterns through a reflection-oriented dashboard. It is designed for exploration and self-reflection, not grading, correction, scoring, or text generation.
+The app helps students provide an academic text, inspect interpretable writing-pattern visualizations, and reflect on their own writing behavior. It is designed for exploration and self-reflection, not grading, correction, scoring, rewriting, plagiarism checking, or text generation.
 
 Research question:
 
@@ -10,19 +10,20 @@ Research question:
 How can an interactive visualization interface help students explore and reflect on individual writing patterns in academic texts?
 ```
 
-## Version 2 Features
+## Version 3 Features
 
-- Local `.txt` upload and an included academic sample text
-- Word, sentence, paragraph, transition, and detected-section counts
-- Average and per-unit sentence/paragraph lengths
+- Three input options: `.txt` upload, direct text input, and optional sample text
+- Explicit `Analyze Text` button to avoid live analysis while users type
+- Manual language selection for English and German
+- Rule-based English and German transition marker categories
+- Transition totals, category counts, and individual marker frequencies
+- English and German academic section heading detection
+- Overview metrics for words, sentences, paragraphs, averages, transitions, and detected sections
 - Interactive Plotly charts for sentence, paragraph, transition, and section patterns
-- Common academic section heading detection
-- Section overview with word count, paragraph count, and relative length
-- Text highlighting for transition words, very short sentences, and very long sentences
-- Expanded editable academic transition list
+- Highlighted text view for section headings, transition markers, shorter sentences, and longer sentences
 - Neutral rule-based writing profile
-- Feature-specific reflection prompts below the visualizations
-- No external API and no language model
+- Feature-specific reflection prompts
+- Fully local, deterministic, transparent analysis
 
 ## Install
 
@@ -41,15 +42,15 @@ python -m pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Open the local address printed by Streamlit, upload a `.txt` file, or select the included sample text.
+Open the local address printed by Streamlit. Choose a language, provide text through one of the input options, and click **Analyze Text**.
 
-## How Analysis Works
+## Evaluation Use
 
-The application uses regular-expression heuristics to identify words, sentence-ending punctuation, blank-line-separated paragraphs, and common academic section headings. Transition terms come from a visible constant in `src/feature_extraction.py`; pandas prepares chart data and Plotly renders it.
+V3 is intended as the stable prototype for a qualitative user study. A participant can provide an academic text, inspect descriptive visualizations, connect charts back to highlighted text passages, and answer reflection prompts. The prototype does not judge the text and should be presented as a reflection aid rather than an assessment tool.
 
-Section detection is based on explicit heading lines such as Abstract, Introduction, Methodology, Results, Discussion, Conclusion, and References. Text highlighting uses fixed thresholds: fewer than 8 words for very short sentences and more than 30 words for very long sentences.
+## Documentation
 
-These simple rules keep the prototype local, deterministic, transparent, and interpretable. The prototype does not evaluate whether the text is good or bad.
+See [PROTOTYPE_V3.md](PROTOTYPE_V3.md) for the final evaluation-ready feature overview, analysis rules, limitations, and evaluation notes.
 
 ## Project Structure
 
@@ -58,11 +59,13 @@ writing-pattern-visualizer/
 ├── app.py
 ├── requirements.txt
 ├── README.md
+├── PROTOTYPE_V3.md
 ├── sample_texts/
 │   └── example_academic_text.txt
 ├── src/
 │   ├── __init__.py
 │   ├── feature_extraction.py
+│   ├── input_handling.py
 │   ├── preprocessing.py
 │   ├── reflection_prompts.py
 │   ├── section_detection.py
@@ -73,10 +76,12 @@ writing-pattern-visualizer/
     └── prototype_log.md
 ```
 
-## Limitations
+## Scope Limits
 
-- Plain text upload does not preserve rich document formatting from Word or PDF files.
-- Heading detection depends on explicit heading lines and can miss unconventional section labels.
-- Sentence splitting may be affected by abbreviations, decimal numbers, citations, and missing punctuation.
-- Transition word frequency does not determine whether a transition is rhetorically effective.
-- Highlighting is threshold-based and descriptive; it does not identify errors or quality problems.
+- No external API
+- No language model
+- No grammar or spelling correction
+- No plagiarism checking
+- No rewriting
+- No quality scores or grades
+- Plain text only
