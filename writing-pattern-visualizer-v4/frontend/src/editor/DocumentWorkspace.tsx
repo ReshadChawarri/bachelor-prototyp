@@ -1,0 +1,143 @@
+import { EditorContent, useEditor } from "@tiptap/react";
+import { useCallback, useMemo, useRef } from "react";
+import { createEditorExtensions } from "./extensions";
+import { serializeDocument } from "./serializer";
+import { EditorToolbar } from "./EditorToolbar";
+import { WritingAnalyticsPanel } from "../panels/WritingAnalyticsPanel";
+import { AiWritingPanel } from "../panels/AiWritingPanel";
+import type { DocumentModel, EditorSelection, ParagraphBlock } from "../types/document";
+
+interface DocumentWorkspaceProps {
+  title: string;
+  leftPanelOpen: boolean;
+  rightPanelOpen: boolean;
+  selectedParagraph?: ParagraphBlock;
+  selection: EditorSelection;
+  onDocumentChange: (document: DocumentModel) => void;
+  onSelectionChange: (selection: EditorSelection) => void;
+  onToggleLeftPanel: () => void;
+  onToggleRightPanel: () => void;
+}
+
+const INITIAL_CONTENT = `
+  <h1>Academic Working Draft</h1>
+  <p>Start writing or paste an academic text here. The editor is the single source of truth for the document content.</p>
+  <p>Phase 1 focuses on the writing workspace foundation, paragraph identity, and document editing behavior.</p>
+`;
+
+export function DocumentWorkspace({
+  title,
+  leftPanelOpen,
+  rightPanelOpen,
+  selectedParagraph,
+  selection,
+  onDocumentChange,
+  onSelectionChange,
+  onToggleLeftPanel,
+  onToggleRightPanel,
+}: DocumentWorkspaceProps) {
+  const revisionRef = useRef(0);
+
+  const publishDocument = useCallback(
+    (editorInstance: NonNullable<ReturnType<typeof useEditor>>, nextRevision: number) => {
+      onDocumentChange(serializeDocument(editorInstance, title, nextRevision));
+    },
+    [onDocumentChange, title],
+  );
+
+  const editor = useEditor({
+    extensions: createEditorExtensions(),
+    content: INITIAL_CONTENT,
+    autofocus: "end",
+    editorProps: {
+      attributes: {
+        class: "document-editor",
+        "aria-label": "Editable academic document",
+      },
+    },
+    onCreate: ({ editor: editorInstance }) => {
+      publishDocument(editorInstance, revisionRef.current);
+      onSelectionChange({ paragraphId: getSelectedParagraphId(editorInstance) });
+    },
+    onUpdate: ({ editor: editorInstance }) => {
+      revisionRef.current += 1;
+      publishDocument(editorInstance, revisionRef.current);
+      onSelectionChange({ paragraphId: getSelectedParagraphId(editorInstance) });
+    },
+    onSelectionUpdate: ({ editor: editorInstance }) => {
+      onSelectionChange({ paragraphId: getSelectedParagraphId(editorInstance) });
+    },
+  });
+
+  const selectedLabel = useMemo(
+    () => selectedParagraph?.text || "Select a paragraph in the document to connect it with the panels.",
+    [selectedParagraph],
+  );
+
+  return (
+    <main className="workspace-grid">
+      <aside className={leftPanelOpen ? "side-panel left-panel" : "side-panel left-panel collapsed"}>
+        <button
+          className="panel-toggle"
+          type="button"
+          onClick={onToggleLeftPanel}
+          aria-expanded={leftPanelOpen}
+        >
+          {leftPanelOpen ? "<" : ">"}
+        </button>
+        {leftPanelOpen && (
+          <WritingAnalyticsPanel
+            revision={revisionRef.current}
+            selectedParagraph={selectedParagraph}
+            selectedParagraphId={selection.paragraphId}
+          />
+        )}
+      </aside>
+
+      <section className="document-area" aria-label="Document workspace">
+        <EditorToolbar editor={editor} />
+        <div className="ruler" aria-hidden="true">
+          {Array.from({ length: 17 }, (_, index) => (
+            <span key={index} className={index % 4 === 0 ? "ruler-tick major" : "ruler-tick"} />
+          ))}
+        </div>
+        <div className="page-stage">
+          <article className="document-page">
+            {editor ? <EditorContent editor={editor} /> : <div className="editor-loading">Loading editor...</div>}
+          </article>
+        </div>
+        <footer className="workspace-status">
+          <span>Selected paragraph: {selection.paragraphId || "none"}</span>
+          <span className="workspace-status-text">{selectedLabel}</span>
+        </footer>
+      </section>
+
+      <aside className={rightPanelOpen ? "side-panel right-panel" : "side-panel right-panel collapsed"}>
+        <button
+          className="panel-toggle"
+          type="button"
+          onClick={onToggleRightPanel}
+          aria-expanded={rightPanelOpen}
+        >
+          {rightPanelOpen ? ">" : "<"}
+        </button>
+        {rightPanelOpen && (
+          <AiWritingPanel selectedParagraph={selectedParagraph} selectedParagraphId={selection.paragraphId} />
+        )}
+      </aside>
+    </main>
+  );
+}
+
+function getSelectedParagraphId(editor: NonNullable<ReturnType<typeof useEditor>>): string | null {
+  const { $from } = editor.state.selection;
+  for (let depth = $from.depth; depth >= 0; depth -= 1) {
+    const node = $from.node(depth);
+    const paragraphId = node.attrs.paragraphId;
+    if (typeof paragraphId === "string" && paragraphId.length > 0) {
+      return paragraphId;
+    }
+  }
+  return null;
+}
+
