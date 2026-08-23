@@ -6,6 +6,7 @@ import re
 from statistics import median
 from typing import Any, Literal
 
+import pymupdf
 import pdfplumber
 from pdfplumber.page import Page
 from pydantic import BaseModel, Field
@@ -79,6 +80,7 @@ class DraftBlock:
     rows: list[list[str]] | None = None
     page_number: int | None = None
     bbox: tuple[float, float, float, float] | None = None
+    layout_order: int = 0
 
 
 def extract_pdf_content(raw_pdf: bytes, filename: str) -> PdfImportResponse:
@@ -87,8 +89,22 @@ def extract_pdf_content(raw_pdf: bytes, filename: str) -> PdfImportResponse:
         raise PdfImportError("The uploaded file is not a valid PDF.")
 
     try:
-        with pdfplumber.open(BytesIO(raw_pdf)) as pdf:
-            page_blocks = [extract_page_blocks(page, page_number=index + 1) for index, page in enumerate(pdf.pages)]
+        with pdfplumber.open(BytesIO(raw_pdf)) as pdf, pymupdf.open(stream=raw_pdf, filetype="pdf") as pymupdf_doc:
+            page_line_sets = [
+                extract_text_lines_from_pymupdf(pymupdf_doc[index], page_number=index + 1)
+                for index in range(len(pymupdf_doc))
+            ]
+            repeated_peripheral_texts = repeated_peripheral_lines(page_line_sets, pymupdf_doc)
+            page_blocks = [
+                extract_page_blocks(
+                    pdf.pages[index],
+                    pymupdf_doc[index],
+                    page_number=index + 1,
+                    text_lines=page_line_sets[index],
+                    repeated_peripheral_texts=repeated_peripheral_texts,
+                )
+                for index in range(len(pdf.pages))
+            ]
             page_count = len(pdf.pages)
     except Exception as exc:
         raise PdfImportError("PDF text extraction failed. The file may be encrypted, invalid, or unsupported.") from exc
@@ -109,10 +125,23 @@ def extract_pdf_content(raw_pdf: bytes, filename: str) -> PdfImportResponse:
     )
 
 
-def extract_page_blocks(page: Page, page_number: int) -> list[ImportedBlock]:
+def extract_page_blocks(
+    page: Page,
+    pymupdf_page: pymupdf.Page,
+    page_number: int,
+    text_lines: list[TextLine],
+    repeated_peripheral_texts: set[str],
+) -> list[ImportedBlock]:
     table_blocks, table_bboxes = extract_tables(page, page_number)
     figure_blocks = extract_figures(page, page_number)
-    lines = extract_text_lines_from_words(page, page_number, excluded_bboxes=table_bboxes)
+    body_size = body_font_size(text_lines)
+    lines = [
+        line
+        for line in text_lines
+        if not point_in_bboxes(line_center(line), table_bboxes)
+        and not is_peripheral_line(line, float(pymupdf_page.rect.height), body_size, repeated_peripheral_texts)
+    ]
+    ordered_lines = merge_split_heading_number_lines(order_lines_by_layout(lines, page_width=float(pymupdf_page.rect.width)))
 
     table_drafts: list[DraftBlock] = [
         DraftBlock(
@@ -135,9 +164,270 @@ def extract_page_blocks(page: Page, page_number: int) -> list[ImportedBlock]:
         for block in figure_blocks
     ]
 
-    text_blocks = reconstruct_text_blocks(lines, body_size=body_font_size(lines))
+    text_blocks = reconstruct_text_blocks(ordered_lines, body_size=body_font_size(ordered_lines))
     layout_items = merge_layout_blocks(text_blocks, table_drafts + figure_drafts)
     return [to_imported_block(block) for block in layout_items]
+
+
+def extract_text_lines_from_pymupdf(page: pymupdf.Page, page_number: int) -> list[TextLine]:
+    """Use PyMuPDF's block/line model as the text-layout source."""
+    page_dict = page.get_text("dict", sort=False)
+    lines: list[TextLine] = []
+
+    for block in page_dict.get("blocks", []):
+        if block.get("type") != 0:
+            continue
+
+        for raw_line in block.get("lines", []):
+            spans = text_spans_from_pymupdf_line(raw_line)
+            text = normalize_block_text(merge_spans_text(spans))
+            if not text:
+                continue
+
+            bbox = tuple(float(value) for value in raw_line.get("bbox", block.get("bbox", (0, 0, 0, 0))))
+            sizes = [float(span.get("size") or 0) for span in raw_line.get("spans", []) if span.get("text")]
+            fontnames = [str(span.get("font") or "") for span in raw_line.get("spans", []) if span.get("text")]
+            bold_count = sum(1 for fontname in fontnames if is_bold_font(fontname))
+            italic_count = sum(1 for fontname in fontnames if is_italic_font(fontname))
+
+            lines.append(
+                TextLine(
+                    words=[],
+                    page_number=page_number,
+                    x0=bbox[0],
+                    x1=bbox[2],
+                    top=bbox[1],
+                    bottom=bbox[3],
+                    size=median(sizes) if sizes else 0,
+                    bold_ratio=bold_count / len(fontnames) if fontnames else 0,
+                    italic_ratio=italic_count / len(fontnames) if fontnames else 0,
+                    text=text,
+                    spans=spans,
+                )
+            )
+
+    return lines
+
+
+def text_spans_from_pymupdf_line(raw_line: dict[str, Any]) -> list[TextSpan]:
+    spans: list[TextSpan] = []
+    previous_x1: float | None = None
+
+    for raw_span in raw_line.get("spans", []):
+        text = re.sub(r"\s+", " ", str(raw_span.get("text") or ""))
+        if not text.strip():
+            continue
+
+        bbox = tuple(float(value) for value in raw_span.get("bbox", (0, 0, 0, 0)))
+        fontname = str(raw_span.get("font") or "")
+        size = float(raw_span.get("size") or 0)
+
+        if previous_x1 is not None and needs_span_space(spans[-1].text if spans else "", text, bbox[0] - previous_x1, size):
+            text = " " + text
+
+        append_span(spans, TextSpan(text=text, bold=is_bold_font(fontname), italic=is_italic_font(fontname)))
+        previous_x1 = bbox[2]
+
+    return spans
+
+
+def needs_span_space(previous_text: str, next_text: str, horizontal_gap: float, font_size: float) -> bool:
+    if horizontal_gap <= max(font_size * 0.16, 1.2):
+        return False
+    if not previous_text or previous_text.endswith((" ", "-", "/", "(", "[", "{")):
+        return False
+    if next_text.startswith((" ", ",", ".", ";", ":", "!", "?", ")", "]", "}")):
+        return False
+    return True
+
+
+def repeated_peripheral_lines(page_line_sets: list[list[TextLine]], doc: pymupdf.Document) -> set[str]:
+    page_occurrences: dict[str, set[int]] = {}
+    if len(page_line_sets) < 2:
+        return set()
+
+    for page_index, lines in enumerate(page_line_sets):
+        page_height = float(doc[page_index].rect.height)
+        for line in lines:
+            if not is_near_page_edge(line, page_height):
+                continue
+            key = repeated_line_key(line.text)
+            if not key:
+                continue
+            page_occurrences.setdefault(key, set()).add(page_index)
+
+    return {key for key, pages in page_occurrences.items() if len(pages) > 1}
+
+
+def repeated_line_key(text: str) -> str:
+    return re.sub(r"\s+", " ", text.casefold()).strip()
+
+
+def is_peripheral_line(line: TextLine, page_height: float, body_size: float, repeated_peripheral_texts: set[str]) -> bool:
+    text = line.text.strip()
+    lowered = text.casefold()
+    edge = is_near_page_edge(line, page_height)
+
+    if is_publication_boilerplate(lowered) or ("license" in lowered and line.size <= max(body_size * 0.86, 7.5)):
+        return True
+    if repeated_line_key(text) in repeated_peripheral_texts:
+        return True
+    if is_likely_running_header(line, page_height, body_size, text):
+        return True
+    if not edge:
+        return False
+    if line.page_number > 1 and looks_like_person_or_affiliation(text):
+        return True
+    if re.fullmatch(r"\d+", text):
+        return True
+    if line.size and line.size <= max(body_size * 0.86, 7.5):
+        return True
+    return any(marker in lowered for marker in PERIPHERAL_MARKERS)
+
+
+def is_likely_running_header(line: TextLine, page_height: float, body_size: float, text: str) -> bool:
+    if line.page_number <= 1 or line.top > max(72, page_height * 0.1):
+        return False
+    return line.size <= max(body_size * 0.86, 7.5) or looks_like_person_or_affiliation(text)
+
+
+def is_publication_boilerplate(lowered: str) -> bool:
+    return any(
+        marker in lowered
+        for marker in (
+            "this work is licensed under",
+            "permission to make digital or hard copies",
+            "creative commons attribution",
+            "acm isbn",
+        )
+    )
+
+
+def is_near_page_edge(line: TextLine, page_height: float) -> bool:
+    return line.top < 34 or line.bottom > page_height - 28
+
+
+def order_lines_by_layout(lines: list[TextLine], page_width: float) -> list[TextLine]:
+    if not lines:
+        return []
+
+    has_two_columns = detect_two_columns([line for line in lines if is_column_candidate(line, page_width)], page_width)
+    if not has_two_columns:
+        return sorted(lines, key=lambda line: (line.top, line.x0))
+
+    column_top = detect_column_region_top(lines, page_width)
+    front_matter = [line for line in lines if line.top < column_top - 3]
+    remaining = [line for line in lines if line.top >= column_top - 3]
+    full_width = [line for line in remaining if is_full_width_line(line, page_width)]
+    column_lines = [line for line in remaining if line not in full_width]
+
+    split_x = infer_column_split(column_lines, page_width)
+    left = [line for line in column_lines if is_left_column_line(line, split_x, page_width)]
+    right = [line for line in column_lines if not is_left_column_line(line, split_x, page_width)]
+
+    return (
+        sorted(front_matter, key=lambda line: (line.top, line.x0))
+        + sorted(left, key=lambda line: (line.top, line.x0))
+        + sorted(right, key=lambda line: (line.top, line.x0))
+        + sorted(full_width, key=lambda line: (line.top, line.x0))
+    )
+
+
+def merge_split_heading_number_lines(lines: list[TextLine]) -> list[TextLine]:
+    merged: list[TextLine] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if index + 1 < len(lines) and is_heading_number_line(line) and can_merge_heading_number(line, lines[index + 1]):
+            merged.append(combine_text_lines(line, lines[index + 1], separator=" "))
+            index += 2
+        else:
+            merged.append(line)
+            index += 1
+    return merged
+
+
+def is_heading_number_line(line: TextLine) -> bool:
+    return bool(re.fullmatch(r"\d+(?:\.\d+)*", line.text.strip()))
+
+
+def can_merge_heading_number(number_line: TextLine, heading_line: TextLine) -> bool:
+    gap = heading_line.top - number_line.bottom
+    heading_text = heading_line.text.strip()
+    if gap > max(number_line.size * 1.4, 14):
+        return False
+    if abs(number_line.x0 - heading_line.x0) > 28:
+        return False
+    if len(heading_text.split()) > 8:
+        return False
+    if "." in number_line.text and len(heading_text.split()) <= 4:
+        return True
+    return heading_text.isupper() or strip_heading_number(heading_text).casefold() in ACADEMIC_HEADINGS
+
+
+def combine_text_lines(first: TextLine, second: TextLine, separator: str) -> TextLine:
+    spans = [span.model_copy() for span in first.spans]
+    if spans:
+        spans[-1].text += separator
+    spans.extend(span.model_copy() for span in second.spans)
+    text = normalize_block_text(merge_spans_text(spans))
+    return TextLine(
+        words=[],
+        page_number=first.page_number,
+        x0=min(first.x0, second.x0),
+        x1=max(first.x1, second.x1),
+        top=min(first.top, second.top),
+        bottom=max(first.bottom, second.bottom),
+        size=median([value for value in (first.size, second.size) if value]) if first.size or second.size else 0,
+        bold_ratio=max(first.bold_ratio, second.bold_ratio),
+        italic_ratio=max(first.italic_ratio, second.italic_ratio),
+        text=text,
+        spans=spans,
+    )
+
+
+def detect_column_region_top(lines: list[TextLine], page_width: float) -> float:
+    body_start_tops = [line.top for line in lines if is_body_start_line(line.text)]
+    if body_start_tops:
+        return min(body_start_tops)
+
+    candidates = [line for line in lines if is_column_candidate(line, page_width)]
+    return min((line.top for line in candidates), default=min(line.top for line in lines))
+
+
+def is_body_start_line(text: str) -> bool:
+    stripped = strip_heading_number(text).strip(":").casefold()
+    return stripped in {"abstract", "introduction", "1 introduction"}
+
+
+def infer_column_split(column_lines: list[TextLine], page_width: float) -> float:
+    if not column_lines:
+        return page_width / 2
+
+    left_edges = [line.x0 for line in column_lines if line.x0 < page_width * 0.35]
+    right_edges = [line.x0 for line in column_lines if line.x0 > page_width * 0.45]
+    if left_edges and right_edges:
+        return (median(left_edges) + median(right_edges)) / 2
+    return page_width / 2
+
+
+def is_column_candidate(line: TextLine, page_width: float) -> bool:
+    return line.x1 - line.x0 < page_width * 0.52 and not is_centered_short_line(line, page_width)
+
+
+def is_full_width_line(line: TextLine, page_width: float) -> bool:
+    return line.x0 < page_width * 0.15 and line.x1 > page_width * 0.82
+
+
+def is_left_column_line(line: TextLine, split_x: float, page_width: float) -> bool:
+    if is_citation_fragment(line.text):
+        return line.x0 < page_width / 2
+    return (line.x0 + line.x1) / 2 < split_x
+
+
+def is_centered_short_line(line: TextLine, page_width: float) -> bool:
+    center = (line.x0 + line.x1) / 2
+    return abs(center - page_width / 2) < page_width * 0.12 and line.x1 - line.x0 < page_width * 0.42
 
 
 def extract_text_lines_from_words(
@@ -312,6 +602,18 @@ def reconstruct_text_blocks(lines: list[TextLine], body_size: float) -> list[Dra
     for line in lines:
         kind = classify_line(line, body_size)
 
+        if current and current.kind in {"paragraph", "list"} and kind == "paragraph" and should_merge_with_current(
+            current, line, normal_gap
+        ):
+            current.lines.append(line)
+            continue
+
+        if kind == "list":
+            if current:
+                blocks.append(finalize_text_block(current))
+            current = DraftBlock(kind="list", lines=[line], page_number=line.page_number)
+            continue
+
         if kind != "paragraph":
             if current:
                 blocks.append(finalize_text_block(current))
@@ -329,7 +631,10 @@ def reconstruct_text_blocks(lines: list[TextLine], body_size: float) -> list[Dra
     if current:
         blocks.append(finalize_text_block(current))
 
-    return merge_adjacent_headings(blocks, body_size)
+    merged_blocks = merge_adjacent_headings(blocks, body_size)
+    for index, block in enumerate(merged_blocks):
+        block.layout_order = index
+    return merged_blocks
 
 
 def classify_line(line: TextLine, body_size: float) -> BlockKind:
@@ -353,7 +658,7 @@ def classify_line(line: TextLine, body_size: float) -> BlockKind:
 def is_conservative_heading(line: TextLine, body_size: float) -> bool:
     text = strip_heading_number(line.text).strip(":")
     words = text.split()
-    if not text or len(words) > 12 or re.search(r"[.!?]$", text):
+    if not text or len(words) > 14:
         return False
     if is_caption(text):
         return False
@@ -362,6 +667,10 @@ def is_conservative_heading(line: TextLine, body_size: float) -> bool:
     weight_signal = line.bold_ratio >= 0.55
     short_signal = len(words) <= 8 and len(text) <= 90
     title_signal = line.page_number == 1 and line.top < 170 and line.size >= body_size * 1.35 and len(words) <= 14
+    if title_signal and not is_metadata_line(text):
+        return True
+    if re.search(r"[.!?]$", text):
+        return False
     if is_metadata_line(text) and not known_heading and not title_signal:
         return False
     if re.match(r"^\d+(?:\.\d+)*\.?\s+\S+", line.text):
@@ -372,6 +681,8 @@ def is_conservative_heading(line: TextLine, body_size: float) -> bool:
 def should_merge_with_current(current: DraftBlock, line: TextLine, normal_gap: float) -> bool:
     previous = current.lines[-1]
     gap = line.top - previous.bottom
+    if is_citation_fragment(line.text) and gap <= max(normal_gap * 2.0, previous.size * 1.2, 12):
+        return True
     if gap > max(normal_gap * 1.75, previous.size * 1.35, 12):
         return False
     if re.search(r"[.!?]$", previous.text) and gap > max(normal_gap * 1.15, previous.size * 0.9, 10):
@@ -418,7 +729,7 @@ def apply_line_join(existing: list[TextSpan], incoming: list[TextSpan]) -> None:
         return
     previous_text = existing[-1].text
     next_text = incoming[0].text.lstrip()
-    if previous_text.endswith("-") and next_text[:1].islower() and should_remove_line_end_hyphen(previous_text):
+    if previous_text.endswith("-") and next_text[:1].islower() and should_remove_line_end_hyphen(previous_text, next_text):
         existing[-1].text = previous_text[:-1]
         incoming[0].text = next_text
     elif previous_text.endswith("-") and next_text[:1].islower():
@@ -427,9 +738,15 @@ def apply_line_join(existing: list[TextSpan], incoming: list[TextSpan]) -> None:
         incoming[0].text = " " + next_text
 
 
-def should_remove_line_end_hyphen(previous_text: str) -> bool:
-    match = re.search(r"([A-Za-z]{5,})-$", previous_text)
-    return bool(match and "-" not in match.group(1))
+def should_remove_line_end_hyphen(previous_text: str, next_text: str) -> bool:
+    previous_match = re.search(r"([A-Za-z]{2,})-$", previous_text)
+    next_match = re.match(r"([a-z]{3,})", next_text)
+    if not previous_match or not next_match:
+        return False
+    stem = previous_match.group(1)
+    if "-" in stem or stem.isupper():
+        return False
+    return len(stem) <= 3 or len(stem) >= 5
 
 
 def merge_adjacent_headings(blocks: list[DraftBlock], body_size: float) -> list[DraftBlock]:
@@ -626,21 +943,34 @@ def is_metadata_line(text: str) -> bool:
     lowered = text.casefold()
     if "@" in text or "doi:" in lowered or "http://" in lowered or "https://" in lowered:
         return True
-    if any(marker in lowered for marker in METADATA_MARKERS):
+    if contains_metadata_marker(lowered):
         return True
     if looks_like_person_or_affiliation(text):
         return True
     return False
 
 
+def contains_metadata_marker(lowered: str) -> bool:
+    for marker in METADATA_MARKERS:
+        normalized_marker = marker.casefold().strip()
+        if " " in normalized_marker:
+            if normalized_marker in lowered:
+                return True
+        elif re.search(rf"\b{re.escape(normalized_marker)}\b", lowered):
+            return True
+    return False
+
+
 def looks_like_person_or_affiliation(text: str) -> bool:
     stripped = text.strip()
+    if strip_heading_number(stripped).strip(":").casefold() in ACADEMIC_HEADINGS:
+        return False
     words = stripped.split()
     if not stripped or len(words) > 18:
         return False
     if re.search(r"[.!?]$", stripped):
         return False
-    if any(marker in stripped.casefold() for marker in METADATA_MARKERS):
+    if contains_metadata_marker(stripped.casefold()):
         return True
     if "," in stripped and sum(word[:1].isupper() for word in words) >= max(2, len(words) // 2):
         return True
@@ -669,6 +999,18 @@ def point_in_bboxes(point: tuple[float, float], bboxes: list[tuple[float, float,
     return any(x0 <= x <= x1 and top <= y <= bottom for x0, top, x1, bottom in bboxes)
 
 
+def line_center(line: TextLine) -> tuple[float, float]:
+    return ((line.x0 + line.x1) / 2, (line.top + line.bottom) / 2)
+
+
+def is_citation_fragment(text: str) -> bool:
+    stripped = text.strip()
+    return bool(
+        re.fullmatch(r"\[[\d,\s;:-]+\]\.?", stripped)
+        or re.fullmatch(r"[\d,\s;:-]+\]\.?", stripped)
+    )
+
+
 ACADEMIC_HEADINGS = {
     "abstract",
     "introduction",
@@ -683,9 +1025,13 @@ ACADEMIC_HEADINGS = {
     "conclusion",
     "references",
     "appendix",
+    "ccs concepts",
+    "keywords",
+    "acm reference format",
 }
 
 METADATA_MARKERS = (
+    "affiliation",
     "university",
     "department",
     "institute",
@@ -697,10 +1043,20 @@ METADATA_MARKERS = (
     "usa",
     "united states",
     "kingdom",
-    "journal",
-    "conference",
-    "proceedings",
     "arxiv",
     "preprint",
     "copyright",
+    "lmu",
+    "munich",
+    "campus",
+)
+
+PERIPHERAL_MARKERS = (
+    "permission to make",
+    "copyright",
+    "licensed under",
+    "license",
+    "doi:",
+    "acm isbn",
+    "conference",
 )

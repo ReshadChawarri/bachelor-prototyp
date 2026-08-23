@@ -53,6 +53,36 @@ def draw_segments(pdf: canvas.Canvas, x: float, y: float, segments: list[tuple[s
         cursor += stringWidth(text, font, size)
 
 
+def draw_wrapped_lines(
+    pdf: canvas.Canvas,
+    x: float,
+    y: float,
+    width: float,
+    text: str,
+    font: str = "Helvetica",
+    size: int = 9,
+    leading: int = 11,
+) -> float:
+    words = text.split()
+    line = ""
+    pdf.setFont(font, size)
+
+    for word in words:
+        candidate = f"{line} {word}".strip()
+        if stringWidth(candidate, font, size) <= width:
+            line = candidate
+        else:
+            pdf.drawString(x, y, line)
+            y -= leading
+            line = word
+
+    if line:
+        pdf.drawString(x, y, line)
+        y -= leading
+
+    return y
+
+
 def draw_simple_table(pdf: canvas.Canvas, x: float, y: float) -> None:
     col_widths = [110, 110]
     row_height = 24
@@ -197,36 +227,89 @@ class PdfImportTests(unittest.TestCase):
         self.assertIn("figure", kinds)
         self.assertTrue(any(block.get("rows") for block in blocks if block["kind"] == "table"))
 
-    def test_c_best_effort_publication_layout_merges_title_and_demotes_metadata(self):
+    def test_c_layout_aware_publication_regression_preserves_logical_order(self):
         def draw(pdf: canvas.Canvas) -> None:
             _, height = letter
+            pdf.setFont("Helvetica", 6)
+            pdf.drawString(62, height - 18, "Permission to make digital or hard copies of all or part of this work")
+            pdf.drawString(62, 20, "tionalLicense.")
+
             pdf.setFont("Helvetica-Bold", 18)
             pdf.drawString(50, height - 54, "Supporting Sensemaking of Large Language Model Outputs at")
             pdf.drawString(50, height - 78, "Scale")
-            pdf.setFont("Helvetica", 11)
-            pdf.drawString(50, height - 108, "Alex Meyer, Samira Khan")
-            pdf.drawString(50, height - 124, "Department of Human-Computer Interaction, Example University, Germany")
-            pdf.drawString(50, height - 140, "doi:10.0000/example")
+            pdf.setFont("Helvetica", 10)
+            pdf.drawCentredString(306, height - 108, "Mohammed Hamid")
+            pdf.drawCentredString(306, height - 123, "LMU Munich")
+            pdf.drawCentredString(306, height - 138, "Munich, Germany")
+            pdf.drawCentredString(306, height - 153, "m.hamid@campus.lmu.de")
 
             left_x = 50
             right_x = 322
-            y = height - 184
-            pdf.setFont("Helvetica", 10)
-            left_lines = [
-                "Left column first idea starts here.",
-                "Left column second idea follows.",
-                "Left column third idea closes.",
-            ]
-            right_lines = [
-                "Right column first idea starts later.",
-                "Right column second idea follows.",
-                "Right column third idea closes.",
-            ]
-            for offset, line in enumerate(left_lines):
-                pdf.drawString(left_x, y - offset * 16, line)
-            for offset, line in enumerate(right_lines):
-                pdf.drawString(right_x, y - offset * 16, line)
-            pdf.drawString(right_x, y - 66, "Figure 2: Publication-style figure caption.")
+            column_width = 220
+
+            pdf.setFont("Helvetica-Bold", 9)
+            pdf.drawString(left_x, height - 185, "ABSTRACT")
+            y = draw_wrapped_lines(
+                pdf,
+                left_x,
+                height - 202,
+                column_width,
+                "Large language model outputs require interfaces that support inspection, comparison, and reflection. "
+                "This abstract describes a layout-aware prototype for academic writing support and includes citations [3, 9, 12]. "
+                "Its usage is generally associated with careful inspection.",
+            )
+            pdf.setFont("Helvetica-Bold", 9)
+            pdf.drawString(left_x, y - 7, "CCS CONCEPTS")
+            y = draw_wrapped_lines(
+                pdf,
+                left_x,
+                y - 24,
+                column_width,
+                "Human-centered computing -> Visualization; Human-centered computing -> Interactive systems and tools.",
+                size=8,
+            )
+            pdf.setFont("Helvetica-Bold", 9)
+            pdf.drawString(left_x, y - 7, "KEYWORDS")
+            y = draw_wrapped_lines(
+                pdf,
+                left_x,
+                y - 24,
+                column_width,
+                "writing analytics, sensemaking, academic reflection",
+                size=8,
+            )
+            pdf.setFont("Helvetica-Bold", 10)
+            pdf.drawString(left_x, y - 10, "1 INTRODUCTION")
+            y = draw_wrapped_lines(
+                pdf,
+                left_x,
+                y - 28,
+                column_width,
+                "Students often need to understand how their academic texts are structured before they can reflect on writing patterns. "
+                "Existing dashboards may expose counts but can detach those counts from the source text.",
+            )
+            pdf.setFont("Helvetica", 9)
+            pdf.drawRightString(left_x + column_width, y + 4, "[16].")
+
+            y_right = height - 185
+            y_right = draw_wrapped_lines(
+                pdf,
+                right_x,
+                y_right,
+                column_width,
+                "The continuation of the introduction explains why logical reading order matters in two-column documents. "
+                "It should appear before the methodology heading because the argument still belongs to the first section.",
+            )
+            pdf.setFont("Helvetica-Bold", 10)
+            pdf.drawString(right_x, y_right - 8, "2 METHODOLOGY")
+            draw_wrapped_lines(
+                pdf,
+                right_x,
+                y_right - 26,
+                column_width,
+                "We implement a deterministic pipeline that segments pages into layout regions before creating editable blocks. "
+                "The method reviews conference proceedings without treating that prose as metadata.",
+            )
 
         response = self.post_pdf(make_pdf_with_drawer(draw), "publication.pdf")
 
@@ -238,15 +321,48 @@ class PdfImportTests(unittest.TestCase):
             "Supporting Sensemaking of Large Language Model Outputs at Scale",
         )
         metadata_text = " ".join(block["text"] for block in blocks if block["kind"] == "metadata")
-        self.assertIn("Alex Meyer", metadata_text)
-        self.assertIn("Example University", metadata_text)
-        self.assertFalse(any(block["kind"] == "heading" and "Alex Meyer" in block["text"] for block in blocks))
-        paragraph_text = " ".join(block["text"] for block in blocks if block["kind"] == "paragraph")
-        self.assertLess(
-            paragraph_text.index("Left column first"),
-            paragraph_text.index("Right column first"),
+        self.assertIn("Mohammed Hamid", metadata_text)
+        self.assertIn("LMU Munich", metadata_text)
+        self.assertIn("Munich, Germany", metadata_text)
+        self.assertIn("m.hamid@campus.lmu.de", metadata_text)
+        self.assertFalse(any(block["kind"] == "heading" and "Mohammed Hamid" in block["text"] for block in blocks))
+
+        combined = "\n".join(block["text"] for block in blocks)
+        self.assert_ordered(
+            combined,
+            [
+                "Supporting Sensemaking of Large Language Model Outputs at Scale",
+                "Mohammed Hamid",
+                "LMU Munich",
+                "Munich, Germany",
+                "m.hamid@campus.lmu.de",
+                "ABSTRACT",
+                "Large language model outputs require interfaces",
+                "academic writing support and includes citations [3, 9, 12].",
+                "usage is generally associated with careful inspection",
+                "CCS CONCEPTS",
+                "Human-centered computing -> Visualization",
+                "KEYWORDS",
+                "writing analytics, sensemaking, academic reflection",
+                "1 INTRODUCTION",
+                "Students often need to understand how their academic texts are structured",
+                "The continuation of the introduction explains why logical reading order matters",
+                "2 METHODOLOGY",
+                "We implement a deterministic pipeline",
+                "conference proceedings without treating that prose as metadata",
+            ],
         )
-        self.assertIn("Figure 2: Publication-style figure caption.", [block["text"] for block in blocks])
+        self.assertNotIn("tionalLicense", combined)
+        self.assertNotIn("Permission to make digital", combined)
+        self.assertEqual(combined.count("Mohammed Hamid"), 1)
+        self.assertEqual(combined.count("Large language model outputs"), 1)
+        self.assertEqual(combined.count("[3, 9, 12]."), 1)
+        self.assertEqual(combined.count("[16]."), 1)
+        self.assertFalse(any(block["kind"] == "paragraph" and block["text"].strip() == "[16]." for block in blocks))
+        self.assertFalse(any(block["kind"] == "metadata" and "usage is generally" in block["text"] for block in blocks))
+        self.assertFalse(any(block["kind"] == "metadata" and "conference proceedings" in block["text"] for block in blocks))
+        self.assertTrue(any(block["kind"] == "heading" and block["text"] == "CCS CONCEPTS" for block in blocks))
+        self.assertTrue(any(block["kind"] == "heading" and block["text"] == "2 METHODOLOGY" for block in blocks))
 
     def test_rejects_invalid_non_pdf_file(self):
         response = self.client.post(
@@ -271,6 +387,13 @@ class PdfImportTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
         self.assertIn("No usable text", response.json()["detail"])
+
+    def assert_ordered(self, text: str, fragments: list[str]) -> None:
+        cursor = -1
+        for fragment in fragments:
+            next_position = text.find(fragment)
+            self.assertGreater(next_position, cursor, f"{fragment!r} did not appear in the expected order")
+            cursor = next_position
 
 
 if __name__ == "__main__":
