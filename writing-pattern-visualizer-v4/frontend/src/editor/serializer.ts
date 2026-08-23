@@ -18,6 +18,7 @@ export function serializeDocument(editor: Editor, title: string, revision: numbe
     paragraphs.push({
       id: paragraphId,
       type: node.type.name === "heading" ? "heading" : "paragraph",
+      blockType: node.attrs.blockType || (node.type.name === "heading" ? "heading" : "paragraph"),
       order: paragraphs.length,
       text: node.textContent,
       headingLevel: node.type.name === "heading" ? node.attrs.level : undefined,

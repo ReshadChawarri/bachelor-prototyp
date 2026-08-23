@@ -1,8 +1,16 @@
 export type TextBlockType = "paragraph" | "heading";
+export type ImportedBlockKind = "paragraph" | "heading" | "metadata" | "list" | "caption" | "table" | "figure";
+
+export interface TextSpan {
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
+}
 
 export interface ParagraphBlock {
   id: string;
   type: TextBlockType;
+  blockType: ImportedBlockKind;
   order: number;
   text: string;
   headingLevel?: number;
@@ -21,9 +29,12 @@ export interface EditorSelection {
 }
 
 export interface ImportedContentBlock {
-  kind: "paragraph" | "heading";
+  kind: ImportedBlockKind;
   text: string;
   heading_level?: number | null;
+  spans?: TextSpan[];
+  rows?: string[][] | null;
+  page_number?: number | null;
 }
 
 export interface ImportedPdfDocument {
