@@ -16,6 +16,16 @@ const persistentParagraphAttributes = {
       return { "data-paragraph-id": attributes.paragraphId };
     },
   },
+  blockType: {
+    default: "paragraph",
+    parseHTML: (element: HTMLElement) => element.getAttribute("data-block-type") || "paragraph",
+    renderHTML: (attributes: { blockType?: string | null }) => {
+      if (!attributes.blockType) {
+        return {};
+      }
+      return { "data-block-type": attributes.blockType };
+    },
+  },
 };
 
 const PersistentParagraph = Paragraph.extend({
@@ -45,4 +55,3 @@ export function createEditorExtensions(): Extensions {
     ParagraphIdentity,
   ];
 }
-
