@@ -20,3 +20,20 @@ export interface EditorSelection {
   paragraphId: string | null;
 }
 
+export interface ImportedContentBlock {
+  kind: "paragraph" | "heading";
+  text: string;
+  heading_level?: number | null;
+}
+
+export interface ImportedPdfDocument {
+  filename: string;
+  page_count: number;
+  character_count: number;
+  blocks: ImportedContentBlock[];
+}
+
+export interface ImportRequest {
+  requestId: number;
+  document: ImportedPdfDocument;
+}

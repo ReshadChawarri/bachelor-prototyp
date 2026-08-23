@@ -1,14 +1,16 @@
 import { EditorContent, useEditor } from "@tiptap/react";
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { createEditorExtensions } from "./extensions";
+import { importedPdfToTipTapDocument } from "./importedDocument";
 import { serializeDocument } from "./serializer";
 import { EditorToolbar } from "./EditorToolbar";
 import { WritingAnalyticsPanel } from "../panels/WritingAnalyticsPanel";
 import { AiWritingPanel } from "../panels/AiWritingPanel";
-import type { DocumentModel, EditorSelection, ParagraphBlock } from "../types/document";
+import type { DocumentModel, EditorSelection, ImportRequest, ParagraphBlock } from "../types/document";
 
 interface DocumentWorkspaceProps {
   title: string;
+  importRequest: ImportRequest | null;
   leftPanelOpen: boolean;
   rightPanelOpen: boolean;
   selectedParagraph?: ParagraphBlock;
@@ -27,6 +29,7 @@ const INITIAL_CONTENT = `
 
 export function DocumentWorkspace({
   title,
+  importRequest,
   leftPanelOpen,
   rightPanelOpen,
   selectedParagraph,
@@ -68,6 +71,16 @@ export function DocumentWorkspace({
       onSelectionChange({ paragraphId: getSelectedParagraphId(editorInstance) });
     },
   });
+
+  useEffect(() => {
+    if (!editor || !importRequest) {
+      return;
+    }
+
+    editor.commands.setContent(importedPdfToTipTapDocument(importRequest.document), true);
+    editor.commands.focus("start");
+    onSelectionChange({ paragraphId: getSelectedParagraphId(editor) });
+  }, [editor, importRequest, onSelectionChange]);
 
   const selectedLabel = useMemo(
     () => selectedParagraph?.text || "Select a paragraph in the document to connect it with the panels.",
@@ -140,4 +153,3 @@ function getSelectedParagraphId(editor: NonNullable<ReturnType<typeof useEditor>
   }
   return null;
 }
-
