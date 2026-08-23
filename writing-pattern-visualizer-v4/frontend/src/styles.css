@@ -96,6 +96,10 @@ button:disabled {
   padding: 0 4.05rem 0.45rem;
 }
 
+.menu-item {
+  position: relative;
+}
+
 .menu-row button {
   border-radius: 4px;
   padding: 0.18rem 0.55rem;
@@ -106,6 +110,42 @@ button:disabled {
 .format-toolbar button:hover,
 .format-toolbar select:hover {
   background: #eef2f5;
+}
+
+.menu-popover {
+  position: absolute;
+  top: 1.75rem;
+  left: 0;
+  min-width: 172px;
+  padding: 0.35rem;
+  border: 1px solid #d6dde5;
+  border-radius: 6px;
+  background: #ffffff;
+  box-shadow: 0 8px 18px rgb(60 64 67 / 16%);
+  z-index: 20;
+}
+
+.menu-popover button {
+  width: 100%;
+  text-align: left;
+  padding: 0.45rem 0.55rem;
+}
+
+.hidden-file-input {
+  display: none;
+}
+
+.import-banner {
+  padding: 0.45rem 4.05rem;
+  border-top: 1px solid #edf0f3;
+  color: #34515f;
+  background: #eef7fb;
+  font-size: 0.9rem;
+}
+
+.import-banner.error {
+  color: #7b2d26;
+  background: #fff0ed;
 }
 
 .workspace-grid {
@@ -343,4 +383,3 @@ button:disabled {
 .editor-loading {
   color: #66717e;
 }
-
