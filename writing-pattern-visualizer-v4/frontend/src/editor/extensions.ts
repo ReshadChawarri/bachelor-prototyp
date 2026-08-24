@@ -3,6 +3,7 @@ import Paragraph from "@tiptap/extension-paragraph";
 import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import type { Extensions } from "@tiptap/core";
+import { AnalyticsHighlight } from "./analyticsHighlight";
 import { ParagraphIdentity } from "./paragraphIdentity";
 
 const persistentParagraphAttributes = {
@@ -53,5 +54,6 @@ export function createEditorExtensions(): Extensions {
     PersistentHeading.configure({ levels: [1, 2, 3] }),
     Underline,
     ParagraphIdentity,
+    AnalyticsHighlight,
   ];
 }

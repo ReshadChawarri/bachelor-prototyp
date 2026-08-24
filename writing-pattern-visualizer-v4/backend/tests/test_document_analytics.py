@@ -64,8 +64,13 @@ class DocumentAnalyticsTests(unittest.TestCase):
         result = self.analyze([block("p1", "However, this point remains visible. However, the count repeats.", 0)])
 
         self.assertEqual(result["transitions"]["total"], 2)
-        self.assertEqual(result["transitions"]["categories"], [{"name": "Contrast", "count": 2}])
-        self.assertEqual(result["transitions"]["terms"][0], {"term": "however", "category": "Contrast", "count": 2})
+        contrast = result["transitions"]["categories"][0]
+        self.assertEqual(contrast["name"], "Contrast")
+        self.assertEqual(contrast["count"], len(contrast["occurrences"]))
+        self.assertEqual(contrast["occurrences"][0]["paragraphId"], "p1")
+        self.assertEqual(contrast["occurrences"][0]["text"], "However")
+        self.assertEqual(result["transitions"]["terms"][0]["term"], "however")
+        self.assertEqual(result["transitions"]["terms"][0]["count"], 2)
 
     def test_transition_words_count_multiple_english_categories(self):
         result = self.analyze(
@@ -83,6 +88,23 @@ class DocumentAnalyticsTests(unittest.TestCase):
         self.assertEqual(categories["Contrast"], 1)
         self.assertEqual(categories["Cause and result"], 1)
         self.assertEqual(categories["Example and specification"], 1)
+
+    def test_transition_occurrences_include_multi_word_phrases(self):
+        result = self.analyze(
+            [
+                block(
+                    "p1",
+                    "On the other hand, this phrase is complete. In contrast, this phrase is also complete.",
+                    0,
+                )
+            ]
+        )
+
+        contrast = next(item for item in result["transitions"]["categories"] if item["name"] == "Contrast")
+        self.assertEqual(contrast["count"], 2)
+        self.assertEqual([occurrence["text"] for occurrence in contrast["occurrences"]], ["On the other hand", "In contrast"])
+        self.assertEqual(contrast["occurrences"][0]["startOffset"], 0)
+        self.assertEqual(contrast["occurrences"][0]["endOffset"], len("On the other hand"))
 
     def test_transition_words_support_german_categories(self):
         result = self.analyze(
@@ -107,7 +129,9 @@ class DocumentAnalyticsTests(unittest.TestCase):
         )
 
         self.assertEqual(result["transitions"]["total"], 1)
-        self.assertEqual(result["transitions"]["terms"], [{"term": "however", "category": "Contrast", "count": 1}])
+        self.assertEqual(result["transitions"]["terms"][0]["term"], "however")
+        self.assertEqual(result["transitions"]["terms"][0]["count"], 1)
+        self.assertEqual(result["transitions"]["terms"][0]["occurrences"][0]["paragraphId"], "p1")
 
     def test_repetition_normalizes_casing_and_excludes_stopwords(self):
         result = self.analyze(
@@ -126,6 +150,16 @@ class DocumentAnalyticsTests(unittest.TestCase):
         self.assertEqual(terms["users"], 3)
         self.assertNotIn("the", terms)
         self.assertNotIn("and", terms)
+        writing = next(item for item in result["repetition"]["terms"] if item["term"] == "writing")
+        self.assertEqual(writing["count"], len(writing["occurrences"]))
+        self.assertEqual([occurrence["text"] for occurrence in writing["occurrences"]], ["Writing", "writing", "WRITING"])
+
+    def test_repetition_occurrences_do_not_include_substring_matches(self):
+        result = self.analyze([block("p1", "Data data database metadata data.", 0)])
+
+        data = next(item for item in result["repetition"]["terms"] if item["term"] == "data")
+        self.assertEqual(data["count"], 3)
+        self.assertEqual([occurrence["text"] for occurrence in data["occurrences"]], ["Data", "data", "data"])
 
     def test_repetition_returns_empty_for_empty_or_short_text(self):
         result = self.analyze([block("p1", "A tiny text.", 0)])

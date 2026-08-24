@@ -1,6 +1,7 @@
 import { EditorContent, useEditor } from "@tiptap/react";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
+import { clearAnalyticsHighlights, setAnalyticsHighlights } from "./analyticsHighlight";
 import { createEditorExtensions } from "./extensions";
 import { importedPdfToTipTapDocument } from "./importedDocument";
 import { findDocumentNodeTarget, selectDocumentNode, type NavigableNodeType } from "./navigation";
@@ -8,7 +9,11 @@ import { serializeDocument } from "./serializer";
 import { EditorToolbar } from "./EditorToolbar";
 import { WritingAnalyticsPanel } from "../panels/WritingAnalyticsPanel";
 import { AiWritingPanel } from "../panels/AiWritingPanel";
-import type { BackendAnalyticsState } from "../types/backendAnalytics";
+import type {
+  ActiveAnalyticsHighlight,
+  AnalyticsHighlightRequest,
+  BackendAnalyticsState,
+} from "../types/backendAnalytics";
 import type { DocumentModel, EditorSelection, ImportRequest, ParagraphBlock } from "../types/document";
 
 interface DocumentWorkspaceProps {
@@ -50,6 +55,7 @@ export function DocumentWorkspace({
   const pageStageRef = useRef<HTMLDivElement | null>(null);
   const highlightedNodeRef = useRef<HTMLElement | null>(null);
   const highlightTimerRef = useRef<number | null>(null);
+  const [activeAnalyticsHighlight, setActiveAnalyticsHighlight] = useState<ActiveAnalyticsHighlight | null>(null);
 
   const publishDocument = useCallback(
     (editorInstance: NonNullable<ReturnType<typeof useEditor>>, nextRevision: number) => {
@@ -98,6 +104,76 @@ export function DocumentWorkspace({
     };
   }, []);
 
+  const clearActiveAnalyticsHighlights = useCallback(() => {
+    if (editor) {
+      clearAnalyticsHighlights(editor);
+    }
+    setActiveAnalyticsHighlight(null);
+  }, [editor]);
+
+  const toggleAnalyticsHighlight = useCallback(
+    (request: AnalyticsHighlightRequest) => {
+      if (!editor) {
+        return;
+      }
+
+      const isSameHighlight =
+        activeAnalyticsHighlight?.type === request.type &&
+        activeAnalyticsHighlight.key === request.key &&
+        activeAnalyticsHighlight.revision === request.revision;
+
+      if (isSameHighlight) {
+        clearActiveAnalyticsHighlights();
+        return;
+      }
+
+      if (request.revision !== document.revision || request.occurrences.length === 0) {
+        clearActiveAnalyticsHighlights();
+        return;
+      }
+
+      const resolvedCount = setAnalyticsHighlights(
+        editor,
+        request.occurrences.map((occurrence) => ({
+          ...occurrence,
+          kind: request.type,
+        })),
+      );
+
+      if (resolvedCount !== request.occurrences.length) {
+        clearAnalyticsHighlights(editor);
+        setActiveAnalyticsHighlight(null);
+        return;
+      }
+
+      setActiveAnalyticsHighlight({
+        type: request.type,
+        key: request.key,
+        label: request.label,
+        revision: request.revision,
+        count: resolvedCount,
+      });
+    },
+    [activeAnalyticsHighlight, clearActiveAnalyticsHighlights, document.revision, editor],
+  );
+
+  useEffect(() => {
+    if (activeAnalyticsHighlight && activeAnalyticsHighlight.revision !== document.revision) {
+      clearActiveAnalyticsHighlights();
+    }
+  }, [activeAnalyticsHighlight, clearActiveAnalyticsHighlights, document.revision]);
+
+  useEffect(() => {
+    if (!activeAnalyticsHighlight) {
+      return;
+    }
+
+    const analyticsRevision = backendAnalytics.data?.revision;
+    if (backendAnalytics.error || (analyticsRevision !== undefined && analyticsRevision !== activeAnalyticsHighlight.revision)) {
+      clearActiveAnalyticsHighlights();
+    }
+  }, [activeAnalyticsHighlight, backendAnalytics.data?.revision, backendAnalytics.error, clearActiveAnalyticsHighlights]);
+
   const navigateToDocumentNode = useCallback(
     (nodeId: string, expectedType: NavigableNodeType) => {
       if (!editor) {
@@ -144,8 +220,11 @@ export function DocumentWorkspace({
             revision={revisionRef.current}
             selectedParagraph={selectedParagraph}
             selectedParagraphId={selection.paragraphId}
+            activeAnalyticsHighlight={activeAnalyticsHighlight}
             onNavigateToParagraph={(paragraphId) => navigateToDocumentNode(paragraphId, "paragraph")}
             onNavigateToHeading={(headingId) => navigateToDocumentNode(headingId, "heading")}
+            onToggleAnalyticsHighlight={toggleAnalyticsHighlight}
+            onClearAnalyticsHighlights={clearActiveAnalyticsHighlights}
           />
         )}
       </aside>

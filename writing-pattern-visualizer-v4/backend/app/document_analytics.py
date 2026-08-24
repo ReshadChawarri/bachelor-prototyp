@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections import Counter
+from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 import re
 import sys
@@ -15,7 +16,6 @@ if str(V3_PROJECT_ROOT) not in sys.path:
 
 from src.feature_extraction import (  # type: ignore[import-not-found]  # noqa: E402
     transition_categories_for_language,
-    transition_counts,
 )
 from src.section_detection import is_academic_heading  # type: ignore[import-not-found]  # noqa: E402
 
@@ -191,6 +191,13 @@ class AnalyticsBlock(BaseModel):
     listType: str | None = None
 
 
+@dataclass(frozen=True)
+class TransitionCandidate:
+    term: str
+    category: str
+    pattern: re.Pattern[str]
+
+
 class DocumentAnalyticsRequest(BaseModel):
     documentId: str
     revision: int
@@ -199,15 +206,26 @@ class DocumentAnalyticsRequest(BaseModel):
     blocks: list[AnalyticsBlock] = Field(default_factory=list)
 
 
+class TransitionOccurrence(BaseModel):
+    paragraphId: str
+    startOffset: int
+    endOffset: int
+    text: str
+    term: str
+    category: str
+
+
 class TransitionCategoryCount(BaseModel):
     name: str
     count: int
+    occurrences: list[TransitionOccurrence] = Field(default_factory=list)
 
 
 class TransitionTermCount(BaseModel):
     term: str
     category: str
     count: int
+    occurrences: list[TransitionOccurrence] = Field(default_factory=list)
 
 
 class TransitionAnalytics(BaseModel):
@@ -216,9 +234,18 @@ class TransitionAnalytics(BaseModel):
     terms: list[TransitionTermCount]
 
 
+class RepetitionOccurrence(BaseModel):
+    paragraphId: str
+    startOffset: int
+    endOffset: int
+    text: str
+    normalizedTerm: str
+
+
 class RepetitionTerm(BaseModel):
     term: str
     count: int
+    occurrences: list[RepetitionOccurrence] = Field(default_factory=list)
 
 
 class RepetitionAnalytics(BaseModel):
@@ -252,15 +279,14 @@ def analyze_document(request: DocumentAnalyticsRequest) -> DocumentAnalyticsResp
     language = normalize_language(request.language)
     blocks = sorted(request.blocks, key=lambda block: block.order)
     prose_blocks = [block for block in blocks if is_prose_block(block)]
-    prose_text = "\n\n".join(block.text for block in prose_blocks if block.text.strip())
 
     return DocumentAnalyticsResponse(
         documentId=request.documentId,
         revision=request.revision,
         requestId=request.requestId,
         language=language,
-        transitions=analyze_transitions(prose_text, language),
-        repetition=analyze_repetition(prose_text, language),
+        transitions=analyze_transitions(prose_blocks, language),
+        repetition=analyze_repetition(prose_blocks, language),
         structure=analyze_structure(blocks, language),
     )
 
@@ -269,54 +295,89 @@ def normalize_language(language: str) -> Language:
     return LANGUAGE_ALIASES.get(language.strip().casefold(), "English")  # type: ignore[return-value]
 
 
-def analyze_transitions(text: str, language: Language) -> TransitionAnalytics:
-    term_counts, category_counts = transition_counts(text, language)
+def analyze_transitions(blocks: list[AnalyticsBlock], language: Language) -> TransitionAnalytics:
     category_definitions = transition_categories_for_language(language)
-    term_to_category = {
-        term.casefold(): category
-        for category, terms in category_definitions.items()
-        for term in terms
-    }
+    occurrences: list[TransitionOccurrence] = []
+
+    for block in blocks:
+        occupied_spans: list[tuple[int, int]] = []
+        for candidate in transition_candidates(language):
+            for match in candidate.pattern.finditer(block.text):
+                span = match.span()
+                if overlaps_existing_span(span, occupied_spans):
+                    continue
+                occupied_spans.append(span)
+                occurrences.append(
+                    TransitionOccurrence(
+                        paragraphId=block.id,
+                        startOffset=span[0],
+                        endOffset=span[1],
+                        text=match.group(0),
+                        term=candidate.term,
+                        category=candidate.category,
+                    )
+                )
+
+    occurrences_by_category: dict[str, list[TransitionOccurrence]] = defaultdict(list)
+    occurrences_by_term: dict[str, list[TransitionOccurrence]] = defaultdict(list)
+    for occurrence in occurrences:
+        occurrences_by_category[occurrence.category].append(occurrence)
+        occurrences_by_term[occurrence.term].append(occurrence)
 
     categories = [
-        TransitionCategoryCount(name=category, count=category_counts.get(category, 0))
+        TransitionCategoryCount(
+            name=category,
+            count=len(occurrences_by_category[category]),
+            occurrences=occurrences_by_category[category],
+        )
         for category in category_definitions
-        if category_counts.get(category, 0) > 0
+        if occurrences_by_category[category]
     ]
     terms = [
         TransitionTermCount(
             term=term,
-            category=term_to_category.get(term.casefold(), "Other"),
-            count=count,
+            category=occurrences_by_term[term][0].category,
+            count=len(occurrences_by_term[term]),
+            occurrences=occurrences_by_term[term],
         )
-        for term, count in term_counts.items()
+        for term in sorted(occurrences_by_term, key=lambda item: (-len(occurrences_by_term[item]), item))
     ]
 
     return TransitionAnalytics(
-        total=sum(term_counts.values()),
+        total=len(occurrences),
         categories=categories,
         terms=terms,
     )
 
 
-def analyze_repetition(text: str, language: Language) -> RepetitionAnalytics:
+def analyze_repetition(blocks: list[AnalyticsBlock], language: Language) -> RepetitionAnalytics:
     stopwords = stopwords_for_language(language)
-    counts: Counter[str] = Counter()
+    occurrences_by_term: dict[str, list[RepetitionOccurrence]] = defaultdict(list)
 
-    for raw_word in WORD_PATTERN.findall(text):
-        word = raw_word.strip("_").casefold()
-        if not word or word.isnumeric():
-            continue
-        if len(word) < REPETITION_MIN_WORD_LENGTH:
-            continue
-        if word in stopwords:
-            continue
-        counts[word] += 1
+    for block in blocks:
+        for match in WORD_PATTERN.finditer(block.text):
+            raw_word = match.group(0)
+            word = raw_word.strip("_").casefold()
+            if not word or word.isnumeric():
+                continue
+            if len(word) < REPETITION_MIN_WORD_LENGTH:
+                continue
+            if word in stopwords:
+                continue
+            occurrences_by_term[word].append(
+                RepetitionOccurrence(
+                    paragraphId=block.id,
+                    startOffset=match.start(),
+                    endOffset=match.end(),
+                    text=raw_word,
+                    normalizedTerm=word,
+                )
+            )
 
     terms = [
-        RepetitionTerm(term=term, count=count)
-        for term, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
-        if count >= REPETITION_MIN_COUNT
+        RepetitionTerm(term=term, count=len(occurrences_by_term[term]), occurrences=occurrences_by_term[term])
+        for term in sorted(occurrences_by_term, key=lambda item: (-len(occurrences_by_term[item]), item))
+        if len(occurrences_by_term[term]) >= REPETITION_MIN_COUNT
     ][:REPETITION_MAX_TERMS]
 
     return RepetitionAnalytics(terms=terms, minCount=REPETITION_MIN_COUNT)
@@ -383,6 +444,41 @@ def stopwords_for_language(language: Language) -> set[str]:
     if language == "German":
         return GERMAN_STOPWORDS
     return ENGLISH_STOPWORDS
+
+
+def transition_candidates(language: Language) -> list[TransitionCandidate]:
+    candidates: list[TransitionCandidate] = []
+    seen_terms: set[str] = set()
+
+    for category, terms in transition_categories_for_language(language).items():
+        for term in terms:
+            key = term.casefold()
+            if key in seen_terms:
+                continue
+            seen_terms.add(key)
+            candidates.append(
+                TransitionCandidate(
+                    term=term,
+                    category=category,
+                    pattern=transition_pattern(term),
+                )
+            )
+
+    return sorted(
+        candidates,
+        key=lambda candidate: (len(candidate.term.split()), len(candidate.term)),
+        reverse=True,
+    )
+
+
+def transition_pattern(term: str) -> re.Pattern[str]:
+    phrase_pattern = r"\s+".join(re.escape(part) for part in term.split())
+    return re.compile(rf"(?<![\w-]){phrase_pattern}(?![\w-])", flags=re.IGNORECASE)
+
+
+def overlaps_existing_span(span: tuple[int, int], occupied_spans: list[tuple[int, int]]) -> bool:
+    start, end = span
+    return any(start < occupied_end and end > occupied_start for occupied_start, occupied_end in occupied_spans)
 
 
 def normalized_text(text: str) -> str:

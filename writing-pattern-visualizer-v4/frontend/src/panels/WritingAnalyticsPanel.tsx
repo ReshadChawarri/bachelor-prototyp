@@ -3,6 +3,8 @@ import type { ReactNode } from "react";
 import { calculateLocalWritingAnalytics } from "../analytics/localAnalytics";
 import type { ParagraphLengthMetric } from "../analytics/localAnalytics";
 import type {
+  ActiveAnalyticsHighlight,
+  AnalyticsHighlightRequest,
   BackendAnalyticsState,
   DocumentAnalyticsResponse,
   RepetitionAnalytics,
@@ -17,8 +19,11 @@ interface WritingAnalyticsPanelProps {
   revision: number;
   selectedParagraph?: ParagraphBlock;
   selectedParagraphId: string | null;
+  activeAnalyticsHighlight?: ActiveAnalyticsHighlight | null;
   onNavigateToParagraph?: (paragraphId: string) => void;
   onNavigateToHeading?: (headingId: string) => void;
+  onToggleAnalyticsHighlight?: (request: AnalyticsHighlightRequest) => void;
+  onClearAnalyticsHighlights?: () => void;
 }
 
 export function WritingAnalyticsPanel({
@@ -27,8 +32,11 @@ export function WritingAnalyticsPanel({
   revision,
   selectedParagraph,
   selectedParagraphId,
+  activeAnalyticsHighlight,
   onNavigateToParagraph,
   onNavigateToHeading,
+  onToggleAnalyticsHighlight,
+  onClearAnalyticsHighlights,
 }: WritingAnalyticsPanelProps) {
   const [allParagraphsOpen, setAllParagraphsOpen] = useState(false);
   const analytics = useMemo(() => calculateLocalWritingAnalytics(document), [document]);
@@ -54,6 +62,17 @@ export function WritingAnalyticsPanel({
         Local metrics update directly from the editable document. Headings and imported non-prose blocks are kept
         separate from prose paragraph analytics.
       </p>
+      {activeAnalyticsHighlight && (
+        <div className="active-highlight-notice">
+          <span>
+            Highlighting {activeAnalyticsHighlight.count} occurrence
+            {activeAnalyticsHighlight.count === 1 ? "" : "s"} of {activeAnalyticsHighlight.label}
+          </span>
+          <button type="button" className="clear-highlights-button" onClick={onClearAnalyticsHighlights}>
+            Clear highlights
+          </button>
+        </div>
+      )}
 
       <section className="analytics-section" aria-label="Overview metrics">
         <h3>Overview</h3>
@@ -129,12 +148,16 @@ export function WritingAnalyticsPanel({
         analytics={currentBackendAnalytics}
         loading={backendAnalytics.loading}
         error={backendAnalytics.error}
+        activeHighlight={activeAnalyticsHighlight}
+        onToggleAnalyticsHighlight={onToggleAnalyticsHighlight}
       />
 
       <RepetitionSection
         analytics={currentBackendAnalytics}
         loading={backendAnalytics.loading}
         error={backendAnalytics.error}
+        activeHighlight={activeAnalyticsHighlight}
+        onToggleAnalyticsHighlight={onToggleAnalyticsHighlight}
       />
 
       <DocumentStructureSection
@@ -180,22 +203,43 @@ function TransitionWordsSection({
   analytics,
   loading,
   error,
+  activeHighlight,
+  onToggleAnalyticsHighlight,
 }: {
   analytics: DocumentAnalyticsResponse | null;
   loading: boolean;
   error: string | null;
+  activeHighlight?: ActiveAnalyticsHighlight | null;
+  onToggleAnalyticsHighlight?: (request: AnalyticsHighlightRequest) => void;
 }) {
   return (
     <section className="analytics-section" aria-label="Transition words">
       <h3>Transition Words</h3>
       <BackendSectionState loading={loading} error={error} analytics={analytics}>
-        {(current) => <TransitionWordsContent transitions={current.transitions} />}
+        {(current) => (
+          <TransitionWordsContent
+            transitions={current.transitions}
+            revision={current.revision}
+            activeHighlight={activeHighlight}
+            onToggleAnalyticsHighlight={onToggleAnalyticsHighlight}
+          />
+        )}
       </BackendSectionState>
     </section>
   );
 }
 
-function TransitionWordsContent({ transitions }: { transitions: TransitionAnalytics }) {
+function TransitionWordsContent({
+  transitions,
+  revision,
+  activeHighlight,
+  onToggleAnalyticsHighlight,
+}: {
+  transitions: TransitionAnalytics;
+  revision: number;
+  activeHighlight?: ActiveAnalyticsHighlight | null;
+  onToggleAnalyticsHighlight?: (request: AnalyticsHighlightRequest) => void;
+}) {
   const maxCategoryCount = Math.max(1, ...transitions.categories.map((category) => category.count));
 
   if (transitions.total === 0) {
@@ -215,6 +259,30 @@ function TransitionWordsContent({ transitions }: { transitions: TransitionAnalyt
           count={category.count}
           maxCount={maxCategoryCount}
           fillClassName="transition-fill"
+          isActive={
+            activeHighlight?.type === "transition" &&
+            activeHighlight.key === category.name &&
+            activeHighlight.revision === revision
+          }
+          ariaLabel={`Highlight ${category.count} ${category.name} transition occurrence${
+            category.count === 1 ? "" : "s"
+          }`}
+          onActivate={
+            onToggleAnalyticsHighlight
+              ? () =>
+                  onToggleAnalyticsHighlight({
+                    type: "transition",
+                    key: category.name,
+                    label: category.name,
+                    revision,
+                    occurrences: category.occurrences.map(({ paragraphId, startOffset, endOffset }) => ({
+                      paragraphId,
+                      startOffset,
+                      endOffset,
+                    })),
+                  })
+              : undefined
+          }
         />
       ))}
     </div>
@@ -225,22 +293,43 @@ function RepetitionSection({
   analytics,
   loading,
   error,
+  activeHighlight,
+  onToggleAnalyticsHighlight,
 }: {
   analytics: DocumentAnalyticsResponse | null;
   loading: boolean;
   error: string | null;
+  activeHighlight?: ActiveAnalyticsHighlight | null;
+  onToggleAnalyticsHighlight?: (request: AnalyticsHighlightRequest) => void;
 }) {
   return (
     <section className="analytics-section" aria-label="Repetition">
       <h3>Repetition</h3>
       <BackendSectionState loading={loading} error={error} analytics={analytics}>
-        {(current) => <RepetitionContent repetition={current.repetition} />}
+        {(current) => (
+          <RepetitionContent
+            repetition={current.repetition}
+            revision={current.revision}
+            activeHighlight={activeHighlight}
+            onToggleAnalyticsHighlight={onToggleAnalyticsHighlight}
+          />
+        )}
       </BackendSectionState>
     </section>
   );
 }
 
-function RepetitionContent({ repetition }: { repetition: RepetitionAnalytics }) {
+function RepetitionContent({
+  repetition,
+  revision,
+  activeHighlight,
+  onToggleAnalyticsHighlight,
+}: {
+  repetition: RepetitionAnalytics;
+  revision: number;
+  activeHighlight?: ActiveAnalyticsHighlight | null;
+  onToggleAnalyticsHighlight?: (request: AnalyticsHighlightRequest) => void;
+}) {
   const maxTermCount = Math.max(1, ...repetition.terms.map((term) => term.count));
 
   if (repetition.terms.length === 0) {
@@ -256,6 +345,28 @@ function RepetitionContent({ repetition }: { repetition: RepetitionAnalytics }) 
           count={term.count}
           maxCount={maxTermCount}
           fillClassName="repetition-fill"
+          isActive={
+            activeHighlight?.type === "repetition" &&
+            activeHighlight.key === term.term &&
+            activeHighlight.revision === revision
+          }
+          ariaLabel={`Highlight ${term.count} occurrence${term.count === 1 ? "" : "s"} of ${term.term}`}
+          onActivate={
+            onToggleAnalyticsHighlight
+              ? () =>
+                  onToggleAnalyticsHighlight({
+                    type: "repetition",
+                    key: term.term,
+                    label: term.term,
+                    revision,
+                    occurrences: term.occurrences.map(({ paragraphId, startOffset, endOffset }) => ({
+                      paragraphId,
+                      startOffset,
+                      endOffset,
+                    })),
+                  })
+              : undefined
+          }
         />
       ))}
     </div>
@@ -360,19 +471,52 @@ function CountBarRow({
   count,
   maxCount,
   fillClassName,
+  isActive = false,
+  ariaLabel,
+  onActivate,
 }: {
   label: string;
   count: number;
   maxCount: number;
   fillClassName: string;
+  isActive?: boolean;
+  ariaLabel?: string;
+  onActivate?: () => void;
 }) {
-  return (
-    <div className="analytics-count-row">
+  const className = [
+    "analytics-count-row",
+    onActivate ? "interactive" : "",
+    isActive ? "selected" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const content = (
+    <>
       <span className="analytics-count-label">{label}</span>
       <div className="analytics-bar-track" aria-hidden="true">
         <span className={`analytics-bar-fill ${fillClassName}`} style={{ width: barWidthPercent(count, maxCount) }} />
       </div>
       <span className="analytics-bar-value">{count}</span>
+    </>
+  );
+
+  if (onActivate) {
+    return (
+      <button
+        className={className}
+        type="button"
+        aria-label={ariaLabel}
+        aria-pressed={isActive}
+        onClick={onActivate}
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <div className={className}>
+      {content}
     </div>
   );
 }

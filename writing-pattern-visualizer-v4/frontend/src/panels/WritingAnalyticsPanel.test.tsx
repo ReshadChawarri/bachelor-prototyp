@@ -2,7 +2,12 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { WritingAnalyticsPanel } from "./WritingAnalyticsPanel";
-import type { BackendAnalyticsState, DocumentAnalyticsResponse } from "../types/backendAnalytics";
+import type {
+  ActiveAnalyticsHighlight,
+  AnalyticsHighlightRequest,
+  BackendAnalyticsState,
+  DocumentAnalyticsResponse,
+} from "../types/backendAnalytics";
 import type { DocumentModel, ParagraphBlock } from "../types/document";
 
 function paragraph(id: string, text: string, order: number, overrides: Partial<ParagraphBlock> = {}): ParagraphBlock {
@@ -31,6 +36,64 @@ const TEST_DOCUMENT = documentWithParagraphs([
   paragraph("p-stable-3", "One two.", 2),
 ]);
 
+const ADDITION_OCCURRENCES = [
+  {
+    paragraphId: "p-stable-1",
+    startOffset: 0,
+    endOffset: 4,
+    text: "also",
+    term: "also",
+    category: "Addition",
+  },
+  {
+    paragraphId: "p-stable-2",
+    startOffset: 0,
+    endOffset: 12,
+    text: "Furthermore",
+    term: "furthermore",
+    category: "Addition",
+  },
+  {
+    paragraphId: "p-stable-3",
+    startOffset: 0,
+    endOffset: 11,
+    text: "In addition",
+    term: "in addition",
+    category: "Addition",
+  },
+];
+
+const CONTRAST_OCCURRENCES = [
+  {
+    paragraphId: "p-stable-2",
+    startOffset: 14,
+    endOffset: 21,
+    text: "However",
+    term: "however",
+    category: "Contrast",
+  },
+  {
+    paragraphId: "p-stable-3",
+    startOffset: 13,
+    endOffset: 24,
+    text: "In contrast",
+    term: "in contrast",
+    category: "Contrast",
+  },
+];
+
+const WRITING_OCCURRENCES = [
+  { paragraphId: "p-stable-1", startOffset: 0, endOffset: 7, text: "Writing", normalizedTerm: "writing" },
+  { paragraphId: "p-stable-1", startOffset: 8, endOffset: 15, text: "writing", normalizedTerm: "writing" },
+  { paragraphId: "p-stable-2", startOffset: 0, endOffset: 7, text: "WRITING", normalizedTerm: "writing" },
+  { paragraphId: "p-stable-3", startOffset: 0, endOffset: 7, text: "writing", normalizedTerm: "writing" },
+];
+
+const PRIVACY_OCCURRENCES = [
+  { paragraphId: "p-stable-2", startOffset: 9, endOffset: 16, text: "privacy", normalizedTerm: "privacy" },
+  { paragraphId: "p-stable-3", startOffset: 9, endOffset: 16, text: "Privacy", normalizedTerm: "privacy" },
+];
+
 const BACKEND_RESPONSE: DocumentAnalyticsResponse = {
   documentId: TEST_DOCUMENT.documentId,
   revision: TEST_DOCUMENT.revision,
@@ -39,16 +102,19 @@ const BACKEND_RESPONSE: DocumentAnalyticsResponse = {
   transitions: {
     total: 5,
     categories: [
-      { name: "Addition", count: 3 },
-      { name: "Contrast", count: 2 },
+      { name: "Addition", count: 3, occurrences: ADDITION_OCCURRENCES },
+      { name: "Contrast", count: 2, occurrences: CONTRAST_OCCURRENCES },
     ],
-    terms: [],
+    terms: [
+      { term: "also", category: "Addition", count: 1, occurrences: [ADDITION_OCCURRENCES[0]] },
+      { term: "however", category: "Contrast", count: 1, occurrences: [CONTRAST_OCCURRENCES[0]] },
+    ],
   },
   repetition: {
     minCount: 2,
     terms: [
-      { term: "writing", count: 4 },
-      { term: "privacy", count: 2 },
+      { term: "writing", count: 4, occurrences: WRITING_OCCURRENCES },
+      { term: "privacy", count: 2, occurrences: PRIVACY_OCCURRENCES },
     ],
   },
   structure: {
@@ -77,6 +143,9 @@ function renderPanel({
   backendAnalytics = backendState(),
   onNavigateToParagraph,
   onNavigateToHeading,
+  activeAnalyticsHighlight,
+  onToggleAnalyticsHighlight,
+  onClearAnalyticsHighlights,
 }: {
   document?: DocumentModel;
   revision?: number;
@@ -85,6 +154,9 @@ function renderPanel({
   backendAnalytics?: BackendAnalyticsState;
   onNavigateToParagraph?: (paragraphId: string) => void;
   onNavigateToHeading?: (headingId: string) => void;
+  activeAnalyticsHighlight?: ActiveAnalyticsHighlight | null;
+  onToggleAnalyticsHighlight?: (request: AnalyticsHighlightRequest) => void;
+  onClearAnalyticsHighlights?: () => void;
 } = {}) {
   return render(
     <WritingAnalyticsPanel
@@ -93,8 +165,11 @@ function renderPanel({
       revision={revision}
       selectedParagraph={selectedParagraph}
       selectedParagraphId={selectedParagraphId}
+      activeAnalyticsHighlight={activeAnalyticsHighlight}
       onNavigateToParagraph={onNavigateToParagraph}
       onNavigateToHeading={onNavigateToHeading}
+      onToggleAnalyticsHighlight={onToggleAnalyticsHighlight}
+      onClearAnalyticsHighlights={onClearAnalyticsHighlights}
     />,
   );
 }
@@ -241,6 +316,74 @@ describe("WritingAnalyticsPanel paragraph length focus", () => {
     expect(screen.getByText("No transition words detected.")).toBeInTheDocument();
     expect(screen.getByText("No notable repetition detected.")).toBeInTheDocument();
     expect(screen.getByText("No document headings detected.")).toBeInTheDocument();
+  });
+
+  it("requests transition category highlighting with backend occurrence spans", async () => {
+    const user = userEvent.setup();
+    const onToggleAnalyticsHighlight = vi.fn();
+    renderPanel({ onToggleAnalyticsHighlight });
+
+    const transitions = screen.getByLabelText("Transition words");
+    await user.click(within(transitions).getByRole("button", { name: /Highlight 2 Contrast transition occurrences/i }));
+
+    expect(onToggleAnalyticsHighlight).toHaveBeenCalledWith({
+      type: "transition",
+      key: "Contrast",
+      label: "Contrast",
+      revision: TEST_DOCUMENT.revision,
+      occurrences: CONTRAST_OCCURRENCES.map(({ paragraphId, startOffset, endOffset }) => ({
+        paragraphId,
+        startOffset,
+        endOffset,
+      })),
+    });
+  });
+
+  it("requests repetition term highlighting with backend occurrence spans", async () => {
+    const user = userEvent.setup();
+    const onToggleAnalyticsHighlight = vi.fn();
+    renderPanel({ onToggleAnalyticsHighlight });
+
+    const repetition = screen.getByLabelText("Repetition");
+    await user.click(within(repetition).getByRole("button", { name: /Highlight 4 occurrences of writing/i }));
+
+    expect(onToggleAnalyticsHighlight).toHaveBeenCalledWith({
+      type: "repetition",
+      key: "writing",
+      label: "writing",
+      revision: TEST_DOCUMENT.revision,
+      occurrences: WRITING_OCCURRENCES.map(({ paragraphId, startOffset, endOffset }) => ({
+        paragraphId,
+        startOffset,
+        endOffset,
+      })),
+    });
+  });
+
+  it("shows active highlight state and clears it through the panel control", async () => {
+    const user = userEvent.setup();
+    const onClearAnalyticsHighlights = vi.fn();
+    renderPanel({
+      onToggleAnalyticsHighlight: vi.fn(),
+      onClearAnalyticsHighlights,
+      activeAnalyticsHighlight: {
+        type: "repetition",
+        key: "privacy",
+        label: "privacy",
+        revision: TEST_DOCUMENT.revision,
+        count: 2,
+      },
+    });
+
+    expect(screen.getByText("Highlighting 2 occurrences of privacy")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Highlight 2 occurrences of privacy/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Clear highlights" }));
+
+    expect(onClearAnalyticsHighlights).toHaveBeenCalledTimes(1);
   });
 
   it("renders backend loading and failure states without hiding local overview metrics", () => {
