@@ -231,10 +231,132 @@ button:disabled {
   line-height: 1.45;
 }
 
+.analytics-section {
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid #edf0f3;
+}
+
+.analytics-section h3 {
+  margin: 0 0 0.65rem;
+  font-size: 0.92rem;
+  color: #303640;
+}
+
+.analytics-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.analytics-metric-card {
+  min-width: 0;
+  padding: 0.55rem 0.6rem;
+  border: 1px solid #e0e5ea;
+  border-radius: 6px;
+  background: #fbfcfd;
+}
+
+.analytics-metric-card span {
+  display: block;
+  margin-bottom: 0.2rem;
+  color: #68727f;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.analytics-metric-card strong {
+  display: block;
+  color: #202124;
+  font-size: 1.05rem;
+  line-height: 1.15;
+}
+
+.analytics-note,
+.analytics-empty {
+  margin: 0.65rem 0 0;
+  color: #66717e;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.analytics-bar-list {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.analytics-bar-row,
+.analytics-distribution-row {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.analytics-distribution-row {
+  grid-template-columns: 78px minmax(0, 1fr) 28px;
+}
+
+.analytics-bar-label,
+.analytics-bar-value,
+.analytics-distribution-label span {
+  color: #4e5966;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.analytics-bar-value {
+  text-align: right;
+}
+
+.analytics-distribution-label {
+  min-width: 0;
+}
+
+.analytics-distribution-label span,
+.analytics-distribution-label small {
+  display: block;
+}
+
+.analytics-distribution-label small {
+  margin-top: 0.08rem;
+  color: #7c8794;
+  font-size: 0.68rem;
+  line-height: 1.15;
+}
+
+.analytics-bar-track {
+  position: relative;
+  height: 8px;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e9edf1;
+}
+
+.analytics-bar-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+}
+
+.paragraph-fill {
+  background: #4d829b;
+}
+
+.sentence-fill {
+  background: #7b8d5a;
+}
+
 .panel-facts {
   display: grid;
   gap: 0.8rem;
   margin: 1rem 0 0;
+}
+
+.debug-facts {
+  margin-top: 1.15rem;
 }
 
 .panel-facts div {
