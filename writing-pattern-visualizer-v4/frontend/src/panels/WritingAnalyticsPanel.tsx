@@ -1,5 +1,6 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { calculateLocalWritingAnalytics } from "../analytics/localAnalytics";
+import type { ParagraphLengthMetric } from "../analytics/localAnalytics";
 import type { DocumentModel, ParagraphBlock } from "../types/document";
 
 interface WritingAnalyticsPanelProps {
@@ -15,9 +16,19 @@ export function WritingAnalyticsPanel({
   selectedParagraph,
   selectedParagraphId,
 }: WritingAnalyticsPanelProps) {
+  const [allParagraphsOpen, setAllParagraphsOpen] = useState(false);
   const analytics = useMemo(() => calculateLocalWritingAnalytics(document), [document]);
   const maxParagraphWords = Math.max(1, ...analytics.paragraphLengths.map((paragraph) => paragraph.wordCount));
   const maxSentenceBucketCount = Math.max(1, ...analytics.sentenceDistribution.map((bucket) => bucket.count));
+  const paragraphRows = useMemo(
+    () =>
+      analytics.paragraphLengths.map((paragraph) => ({
+        ...paragraph,
+        isSelected: paragraph.paragraphId === selectedParagraphId,
+      })),
+    [analytics.paragraphLengths, selectedParagraphId],
+  );
+  const selectedParagraphLength = paragraphRows.find((paragraph) => paragraph.isSelected);
 
   return (
     <div className="panel-content">
@@ -48,20 +59,31 @@ export function WritingAnalyticsPanel({
         {analytics.paragraphLengths.length === 0 ? (
           <p className="analytics-empty">No prose paragraphs are available for paragraph-length analytics.</p>
         ) : (
-          <div className="analytics-bar-list">
-            {analytics.paragraphLengths.map((paragraph) => (
-              <div key={paragraph.paragraphId} className="analytics-bar-row" title={paragraph.textPreview}>
-                <span className="analytics-bar-label">{paragraph.label}</span>
-                <div className="analytics-bar-track" aria-hidden="true">
-                  <span
-                    className="analytics-bar-fill paragraph-fill"
-                    style={{ width: `${Math.max(6, (paragraph.wordCount / maxParagraphWords) * 100)}%` }}
+          <>
+            <SelectedParagraphLengthView paragraph={selectedParagraphLength} maxParagraphWords={maxParagraphWords} />
+
+            <button
+              className="paragraph-overview-toggle"
+              type="button"
+              aria-expanded={allParagraphsOpen}
+              onClick={() => setAllParagraphsOpen((open) => !open)}
+            >
+              <span aria-hidden="true">{allParagraphsOpen ? "▾" : "▸"}</span>
+              All paragraphs ({analytics.paragraphLengths.length})
+            </button>
+
+            {allParagraphsOpen && (
+              <div className="analytics-bar-list paragraph-overview-list">
+                {paragraphRows.map((paragraph) => (
+                  <ParagraphLengthRow
+                    key={paragraph.paragraphId}
+                    paragraph={paragraph}
+                    maxParagraphWords={maxParagraphWords}
                   />
-                </div>
-                <span className="analytics-bar-value">{paragraph.wordCount}</span>
+                ))}
               </div>
-            ))}
-          </div>
+            )}
+          </>
         )}
       </section>
 
@@ -115,4 +137,73 @@ function MetricCard({ label, value }: { label: string; value: number | string })
 
 function formatAverage(value: number): string {
   return value === 0 ? "0" : value.toFixed(1);
+}
+
+function SelectedParagraphLengthView({
+  paragraph,
+  maxParagraphWords,
+}: {
+  paragraph?: ParagraphLengthMetric;
+  maxParagraphWords: number;
+}) {
+  if (!paragraph) {
+    return (
+      <div className="selected-paragraph-summary empty">
+        <p>Select a paragraph in the document</p>
+        <p>to view its length.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="selected-paragraph-summary"
+      data-paragraph-id={paragraph.paragraphId}
+      title={paragraph.textPreview}
+    >
+      <p className="selected-paragraph-meta">Selected paragraph · {paragraph.label}</p>
+      <p className="selected-paragraph-word-count">
+        {paragraph.wordCount} {paragraph.wordCount === 1 ? "word" : "words"}
+      </p>
+      <div className="analytics-bar-track selected-paragraph-track" aria-hidden="true">
+        <span
+          className="analytics-bar-fill paragraph-fill"
+          style={{ width: barWidthPercent(paragraph.wordCount, maxParagraphWords) }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function ParagraphLengthRow({
+  paragraph,
+  maxParagraphWords,
+}: {
+  paragraph: ParagraphLengthMetric & { isSelected: boolean };
+  maxParagraphWords: number;
+}) {
+  return (
+    <div
+      className={paragraph.isSelected ? "analytics-bar-row selected" : "analytics-bar-row"}
+      title={paragraph.textPreview}
+      data-paragraph-id={paragraph.paragraphId}
+      aria-current={paragraph.isSelected ? "true" : undefined}
+    >
+      <span className="analytics-bar-label">{paragraph.label}</span>
+      <div className="analytics-bar-track" aria-hidden="true">
+        <span
+          className="analytics-bar-fill paragraph-fill"
+          style={{ width: barWidthPercent(paragraph.wordCount, maxParagraphWords) }}
+        />
+      </div>
+      <span className="analytics-bar-value">{paragraph.wordCount}</span>
+    </div>
+  );
+}
+
+function barWidthPercent(wordCount: number, maxWords: number): string {
+  if (wordCount <= 0) {
+    return "0%";
+  }
+  return `${Math.max(6, (wordCount / maxWords) * 100)}%`;
 }
