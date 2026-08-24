@@ -13,12 +13,23 @@ export interface DocumentAnalyticsRequest {
 export interface TransitionCategoryCount {
   name: string;
   count: number;
+  occurrences: TransitionOccurrence[];
 }
 
 export interface TransitionTermCount {
   term: string;
   category: string;
   count: number;
+  occurrences: TransitionOccurrence[];
+}
+
+export interface TransitionOccurrence {
+  paragraphId: string;
+  startOffset: number;
+  endOffset: number;
+  text: string;
+  term: string;
+  category: string;
 }
 
 export interface TransitionAnalytics {
@@ -30,6 +41,15 @@ export interface TransitionAnalytics {
 export interface RepetitionTerm {
   term: string;
   count: number;
+  occurrences: RepetitionOccurrence[];
+}
+
+export interface RepetitionOccurrence {
+  paragraphId: string;
+  startOffset: number;
+  endOffset: number;
+  text: string;
+  normalizedTerm: string;
 }
 
 export interface RepetitionAnalytics {
@@ -63,6 +83,30 @@ export interface BackendAnalyticsState {
   data: DocumentAnalyticsResponse | null;
   loading: boolean;
   error: string | null;
+}
+
+export type AnalyticsHighlightType = "repetition" | "transition";
+
+export interface AnalyticsOccurrenceSpan {
+  paragraphId: string;
+  startOffset: number;
+  endOffset: number;
+}
+
+export interface AnalyticsHighlightRequest {
+  type: AnalyticsHighlightType;
+  key: string;
+  label: string;
+  revision: number;
+  occurrences: AnalyticsOccurrenceSpan[];
+}
+
+export interface ActiveAnalyticsHighlight {
+  type: AnalyticsHighlightType;
+  key: string;
+  label: string;
+  revision: number;
+  count: number;
 }
 
 export function documentAnalyticsRequest(
