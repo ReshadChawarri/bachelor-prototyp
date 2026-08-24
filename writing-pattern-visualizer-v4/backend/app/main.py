@@ -2,6 +2,11 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from .document_analytics import (
+    DocumentAnalyticsRequest,
+    DocumentAnalyticsResponse,
+    analyze_document,
+)
 from .pdf_import import PdfImportError, PdfImportResponse, extract_pdf_content
 
 
@@ -49,3 +54,8 @@ async def import_pdf(file: UploadFile = File(...)) -> PdfImportResponse:
         return extract_pdf_content(raw_pdf, filename)
     except PdfImportError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/analytics/document", response_model=DocumentAnalyticsResponse)
+def document_analytics(request: DocumentAnalyticsRequest) -> DocumentAnalyticsResponse:
+    return analyze_document(request)
