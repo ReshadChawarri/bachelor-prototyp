@@ -229,6 +229,7 @@ class RepetitionAnalytics(BaseModel):
 class StructureHeading(BaseModel):
     text: str
     level: int
+    nodeId: str | None = None
     paragraphId: str | None = None
 
 
@@ -326,6 +327,7 @@ def analyze_structure(blocks: list[AnalyticsBlock], language: Language) -> Docum
         StructureHeading(
             text=normalized_text(block.text),
             level=normalize_heading_level(block.headingLevel),
+            nodeId=block.id,
             paragraphId=block.id,
         )
         for block in blocks
@@ -338,6 +340,7 @@ def analyze_structure(blocks: list[AnalyticsBlock], language: Language) -> Docum
         StructureHeading(
             text=normalized_text(block.text),
             level=infer_heading_level(block.text),
+            nodeId=None,
             paragraphId=block.id,
         )
         for block in blocks

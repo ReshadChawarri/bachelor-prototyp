@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { WritingAnalyticsPanel } from "./WritingAnalyticsPanel";
 import type { BackendAnalyticsState, DocumentAnalyticsResponse } from "../types/backendAnalytics";
 import type { DocumentModel, ParagraphBlock } from "../types/document";
@@ -54,8 +54,8 @@ const BACKEND_RESPONSE: DocumentAnalyticsResponse = {
   structure: {
     source: "explicit",
     headings: [
-      { text: "Abstract", level: 1, paragraphId: "h1" },
-      { text: "2.1 Participants", level: 2, paragraphId: "h2" },
+      { text: "Abstract", level: 1, nodeId: "h1", paragraphId: "h1" },
+      { text: "2.1 Participants", level: 2, nodeId: "h2", paragraphId: "h2" },
     ],
   },
 };
@@ -75,12 +75,16 @@ function renderPanel({
   selectedParagraph = TEST_DOCUMENT.paragraphs[1],
   selectedParagraphId = "p-stable-2",
   backendAnalytics = backendState(),
+  onNavigateToParagraph,
+  onNavigateToHeading,
 }: {
   document?: DocumentModel;
   revision?: number;
   selectedParagraph?: ParagraphBlock;
   selectedParagraphId?: string | null;
   backendAnalytics?: BackendAnalyticsState;
+  onNavigateToParagraph?: (paragraphId: string) => void;
+  onNavigateToHeading?: (headingId: string) => void;
 } = {}) {
   return render(
     <WritingAnalyticsPanel
@@ -89,6 +93,8 @@ function renderPanel({
       revision={revision}
       selectedParagraph={selectedParagraph}
       selectedParagraphId={selectedParagraphId}
+      onNavigateToParagraph={onNavigateToParagraph}
+      onNavigateToHeading={onNavigateToHeading}
     />,
   );
 }
@@ -259,5 +265,76 @@ describe("WritingAnalyticsPanel paragraph length focus", () => {
 
     expect(screen.getByText("Words")).toBeInTheDocument();
     expect(screen.getAllByText("Deterministic writing analytics are temporarily unavailable.")).toHaveLength(3);
+  });
+
+  it("navigates paragraph overview rows by stable paragraph ID rather than display label", async () => {
+    const user = userEvent.setup();
+    const onNavigateToParagraph = vi.fn();
+    renderPanel({ onNavigateToParagraph });
+
+    const paragraphLengthSection = screen.getByLabelText("Paragraph length");
+    await user.click(within(paragraphLengthSection).getByRole("button", { name: "All paragraphs (3)" }));
+    await user.click(within(paragraphLengthSection).getByRole("button", { name: /P3/i }));
+
+    expect(onNavigateToParagraph).toHaveBeenCalledWith("p-stable-3");
+  });
+
+  it("keeps paragraph navigation keyboard accessible", async () => {
+    const user = userEvent.setup();
+    const onNavigateToParagraph = vi.fn();
+    renderPanel({ onNavigateToParagraph });
+
+    const paragraphLengthSection = screen.getByLabelText("Paragraph length");
+    await user.click(within(paragraphLengthSection).getByRole("button", { name: "All paragraphs (3)" }));
+
+    const firstParagraph = within(paragraphLengthSection).getByRole("button", { name: /P1/i });
+    firstParagraph.focus();
+    await user.keyboard("{Enter}");
+
+    expect(onNavigateToParagraph).toHaveBeenCalledWith("p-stable-1");
+  });
+
+  it("navigates explicit structure headings by node ID and distinguishes duplicate names", async () => {
+    const user = userEvent.setup();
+    const onNavigateToHeading = vi.fn();
+    renderPanel({
+      onNavigateToHeading,
+      backendAnalytics: backendState({
+        data: {
+          ...BACKEND_RESPONSE,
+          structure: {
+            source: "explicit",
+            headings: [
+              { text: "Results", level: 1, nodeId: "heading-a", paragraphId: "heading-a" },
+              { text: "Results", level: 2, nodeId: "heading-b", paragraphId: "heading-b" },
+            ],
+          },
+        },
+      }),
+    });
+
+    const headingButtons = screen.getAllByRole("button", { name: "Results" });
+    await user.click(headingButtons[1]);
+
+    expect(onNavigateToHeading).toHaveBeenCalledWith("heading-b");
+  });
+
+  it("does not make heuristic structure entries clickable without explicit node IDs", () => {
+    renderPanel({
+      onNavigateToHeading: vi.fn(),
+      backendAnalytics: backendState({
+        data: {
+          ...BACKEND_RESPONSE,
+          structure: {
+            source: "heuristic",
+            headings: [{ text: "1 Introduction", level: 1, nodeId: null, paragraphId: "p-heading-like" }],
+          },
+        },
+      }),
+    });
+
+    const structure = screen.getByLabelText("Document structure");
+    expect(within(structure).getByText("1 Introduction")).toBeInTheDocument();
+    expect(within(structure).queryByRole("button", { name: "1 Introduction" })).not.toBeInTheDocument();
   });
 });

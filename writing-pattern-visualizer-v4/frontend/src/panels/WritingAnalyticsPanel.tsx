@@ -17,6 +17,8 @@ interface WritingAnalyticsPanelProps {
   revision: number;
   selectedParagraph?: ParagraphBlock;
   selectedParagraphId: string | null;
+  onNavigateToParagraph?: (paragraphId: string) => void;
+  onNavigateToHeading?: (headingId: string) => void;
 }
 
 export function WritingAnalyticsPanel({
@@ -25,6 +27,8 @@ export function WritingAnalyticsPanel({
   revision,
   selectedParagraph,
   selectedParagraphId,
+  onNavigateToParagraph,
+  onNavigateToHeading,
 }: WritingAnalyticsPanelProps) {
   const [allParagraphsOpen, setAllParagraphsOpen] = useState(false);
   const analytics = useMemo(() => calculateLocalWritingAnalytics(document), [document]);
@@ -91,6 +95,7 @@ export function WritingAnalyticsPanel({
                     key={paragraph.paragraphId}
                     paragraph={paragraph}
                     maxParagraphWords={maxParagraphWords}
+                    onNavigate={onNavigateToParagraph}
                   />
                 ))}
               </div>
@@ -136,6 +141,8 @@ export function WritingAnalyticsPanel({
         analytics={currentBackendAnalytics}
         loading={backendAnalytics.loading}
         error={backendAnalytics.error}
+        selectedNodeId={selectedParagraphId}
+        onNavigateToHeading={onNavigateToHeading}
       />
 
       <dl className="panel-facts debug-facts">
@@ -259,37 +266,71 @@ function DocumentStructureSection({
   analytics,
   loading,
   error,
+  selectedNodeId,
+  onNavigateToHeading,
 }: {
   analytics: DocumentAnalyticsResponse | null;
   loading: boolean;
   error: string | null;
+  selectedNodeId: string | null;
+  onNavigateToHeading?: (headingId: string) => void;
 }) {
   return (
     <section className="analytics-section" aria-label="Document structure">
       <h3>Document Structure</h3>
       <BackendSectionState loading={loading} error={error} analytics={analytics}>
-        {(current) => <DocumentStructureContent structure={current.structure} />}
+        {(current) => (
+          <DocumentStructureContent
+            structure={current.structure}
+            selectedNodeId={selectedNodeId}
+            onNavigateToHeading={onNavigateToHeading}
+          />
+        )}
       </BackendSectionState>
     </section>
   );
 }
 
-function DocumentStructureContent({ structure }: { structure: DocumentStructureAnalytics }) {
+function DocumentStructureContent({
+  structure,
+  selectedNodeId,
+  onNavigateToHeading,
+}: {
+  structure: DocumentStructureAnalytics;
+  selectedNodeId: string | null;
+  onNavigateToHeading?: (headingId: string) => void;
+}) {
   if (structure.headings.length === 0) {
     return <p className="analytics-empty">No document headings detected.</p>;
   }
 
   return (
     <ol className="document-structure-list">
-      {structure.headings.map((heading, index) => (
-        <li
-          key={`${heading.paragraphId ?? "heading"}-${index}`}
-          className={`document-structure-item level-${Math.min(Math.max(heading.level, 1), 3)}`}
-          data-paragraph-id={heading.paragraphId ?? undefined}
-        >
-          {heading.text}
-        </li>
-      ))}
+      {structure.headings.map((heading, index) => {
+        const nodeId = structure.source === "explicit" ? (heading.nodeId ?? heading.paragraphId) : null;
+        const level = Math.min(Math.max(heading.level, 1), 3);
+        const isSelected = Boolean(nodeId && nodeId === selectedNodeId);
+
+        return (
+          <li key={`${nodeId ?? heading.paragraphId ?? "heading"}-${index}`}>
+            {nodeId && onNavigateToHeading ? (
+              <button
+                className={isSelected ? `document-structure-item level-${level} selected` : `document-structure-item level-${level}`}
+                type="button"
+                data-node-id={nodeId}
+                aria-current={isSelected ? "true" : undefined}
+                onClick={() => onNavigateToHeading(nodeId)}
+              >
+                {heading.text}
+              </button>
+            ) : (
+              <span className={`document-structure-item level-${level}`} data-node-id={nodeId ?? undefined}>
+                {heading.text}
+              </span>
+            )}
+          </li>
+        );
+      })}
     </ol>
   );
 }
@@ -375,16 +416,20 @@ function SelectedParagraphLengthView({
 function ParagraphLengthRow({
   paragraph,
   maxParagraphWords,
+  onNavigate,
 }: {
   paragraph: ParagraphLengthMetric & { isSelected: boolean };
   maxParagraphWords: number;
+  onNavigate?: (paragraphId: string) => void;
 }) {
   return (
-    <div
+    <button
       className={paragraph.isSelected ? "analytics-bar-row selected" : "analytics-bar-row"}
+      type="button"
       title={paragraph.textPreview}
       data-paragraph-id={paragraph.paragraphId}
       aria-current={paragraph.isSelected ? "true" : undefined}
+      onClick={() => onNavigate?.(paragraph.paragraphId)}
     >
       <span className="analytics-bar-label">{paragraph.label}</span>
       <div className="analytics-bar-track" aria-hidden="true">
@@ -394,7 +439,7 @@ function ParagraphLengthRow({
         />
       </div>
       <span className="analytics-bar-value">{paragraph.wordCount}</span>
-    </div>
+    </button>
   );
 }
 

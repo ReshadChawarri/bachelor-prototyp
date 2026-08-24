@@ -1,7 +1,9 @@
 import { EditorContent, useEditor } from "@tiptap/react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
+import type { MutableRefObject } from "react";
 import { createEditorExtensions } from "./extensions";
 import { importedPdfToTipTapDocument } from "./importedDocument";
+import { findDocumentNodeTarget, selectDocumentNode, type NavigableNodeType } from "./navigation";
 import { serializeDocument } from "./serializer";
 import { EditorToolbar } from "./EditorToolbar";
 import { WritingAnalyticsPanel } from "../panels/WritingAnalyticsPanel";
@@ -45,6 +47,9 @@ export function DocumentWorkspace({
   onToggleRightPanel,
 }: DocumentWorkspaceProps) {
   const revisionRef = useRef(0);
+  const pageStageRef = useRef<HTMLDivElement | null>(null);
+  const highlightedNodeRef = useRef<HTMLElement | null>(null);
+  const highlightTimerRef = useRef<number | null>(null);
 
   const publishDocument = useCallback(
     (editorInstance: NonNullable<ReturnType<typeof useEditor>>, nextRevision: number) => {
@@ -87,6 +92,35 @@ export function DocumentWorkspace({
     onSelectionChange({ paragraphId: getSelectedParagraphId(editor) });
   }, [editor, importRequest, onSelectionChange]);
 
+  useEffect(() => {
+    return () => {
+      clearNavigationHighlight(highlightedNodeRef, highlightTimerRef);
+    };
+  }, []);
+
+  const navigateToDocumentNode = useCallback(
+    (nodeId: string, expectedType: NavigableNodeType) => {
+      if (!editor) {
+        return;
+      }
+
+      const target = findDocumentNodeTarget(editor, nodeId, expectedType);
+      if (!target) {
+        return;
+      }
+
+      const targetElement = editor.view.nodeDOM(target.position);
+      const didSelect = selectDocumentNode(editor, target);
+      if (!didSelect || !(targetElement instanceof HTMLElement)) {
+        return;
+      }
+
+      scrollElementIntoPageStage(targetElement, pageStageRef.current);
+      showNavigationHighlight(targetElement, highlightedNodeRef, highlightTimerRef);
+    },
+    [editor],
+  );
+
   const selectedLabel = useMemo(
     () => selectedParagraph?.text || "Select a paragraph in the document to connect it with the panels.",
     [selectedParagraph],
@@ -110,6 +144,8 @@ export function DocumentWorkspace({
             revision={revisionRef.current}
             selectedParagraph={selectedParagraph}
             selectedParagraphId={selection.paragraphId}
+            onNavigateToParagraph={(paragraphId) => navigateToDocumentNode(paragraphId, "paragraph")}
+            onNavigateToHeading={(headingId) => navigateToDocumentNode(headingId, "heading")}
           />
         )}
       </aside>
@@ -121,7 +157,7 @@ export function DocumentWorkspace({
             <span key={index} className={index % 4 === 0 ? "ruler-tick major" : "ruler-tick"} />
           ))}
         </div>
-        <div className="page-stage">
+        <div className="page-stage" ref={pageStageRef}>
           <article className="document-page">
             {editor ? <EditorContent editor={editor} /> : <div className="editor-loading">Loading editor...</div>}
           </article>
@@ -159,4 +195,51 @@ function getSelectedParagraphId(editor: NonNullable<ReturnType<typeof useEditor>
     }
   }
   return null;
+}
+
+export function scrollElementIntoPageStage(targetElement: HTMLElement, pageStage: HTMLElement | null) {
+  if (!pageStage) {
+    return;
+  }
+
+  const targetRect = targetElement.getBoundingClientRect();
+  const stageRect = pageStage.getBoundingClientRect();
+  const targetOffset = targetRect.top - stageRect.top;
+  const comfortableOffset = stageRect.height * 0.32;
+
+  pageStage.scrollTo({
+    top: pageStage.scrollTop + targetOffset - comfortableOffset,
+    behavior: "smooth",
+  });
+}
+
+function showNavigationHighlight(
+  targetElement: HTMLElement,
+  highlightedNodeRef: MutableRefObject<HTMLElement | null>,
+  highlightTimerRef: MutableRefObject<number | null>,
+) {
+  clearNavigationHighlight(highlightedNodeRef, highlightTimerRef);
+
+  targetElement.classList.add("navigation-target-highlight");
+  highlightedNodeRef.current = targetElement;
+  highlightTimerRef.current = window.setTimeout(() => {
+    targetElement.classList.remove("navigation-target-highlight");
+    if (highlightedNodeRef.current === targetElement) {
+      highlightedNodeRef.current = null;
+    }
+    highlightTimerRef.current = null;
+  }, 1600);
+}
+
+function clearNavigationHighlight(
+  highlightedNodeRef: MutableRefObject<HTMLElement | null>,
+  highlightTimerRef: MutableRefObject<number | null>,
+) {
+  if (highlightTimerRef.current !== null) {
+    window.clearTimeout(highlightTimerRef.current);
+    highlightTimerRef.current = null;
+  }
+
+  highlightedNodeRef.current?.classList.remove("navigation-target-highlight");
+  highlightedNodeRef.current = null;
 }
