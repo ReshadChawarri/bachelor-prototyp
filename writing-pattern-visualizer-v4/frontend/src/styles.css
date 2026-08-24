@@ -352,7 +352,10 @@ button:disabled {
   grid-template-columns: 34px minmax(0, 1fr) 34px;
   align-items: center;
   gap: 0.45rem;
+  width: 100%;
   min-width: 0;
+  padding: 0;
+  text-align: left;
 }
 
 .analytics-bar-row.selected {
@@ -360,6 +363,21 @@ button:disabled {
   padding: 0.15rem 0.25rem;
   border-radius: 5px;
   background: #eef6f8;
+}
+
+button.analytics-bar-row {
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+button.analytics-bar-row:hover {
+  background: #f1f6f8;
+}
+
+button.analytics-bar-row:focus-visible,
+.document-structure-item:focus-visible {
+  outline: 2px solid #8eb4c4;
+  outline-offset: 2px;
 }
 
 .analytics-distribution-row {
@@ -470,13 +488,27 @@ button:disabled {
 }
 
 .document-structure-item {
+  display: block;
+  width: 100%;
   min-width: 0;
   overflow: hidden;
+  padding: 0.08rem 0.1rem;
+  border-radius: 4px;
   color: #303640;
   font-size: 0.82rem;
   line-height: 1.3;
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+button.document-structure-item {
+  cursor: pointer;
+}
+
+button.document-structure-item:hover,
+.document-structure-item.selected {
+  background: #f1f6f8;
 }
 
 .document-structure-item.level-2 {
@@ -643,6 +675,25 @@ button:disabled {
 
 .document-editor [data-paragraph-id]:hover {
   background: #f6fafc;
+}
+
+.document-editor .navigation-target-highlight {
+  animation: navigation-highlight-fade 1.6s ease-out;
+  background: #e7f4f7;
+  box-shadow: 0 0 0 3px #e7f4f7;
+}
+
+@keyframes navigation-highlight-fade {
+  0%,
+  55% {
+    background: #e7f4f7;
+    box-shadow: 0 0 0 3px #e7f4f7;
+  }
+
+  100% {
+    background: transparent;
+    box-shadow: 0 0 0 0 transparent;
+  }
 }
 
 .document-editor [data-block-type="metadata"] {

@@ -157,9 +157,9 @@ class DocumentAnalyticsTests(unittest.TestCase):
         self.assertEqual(
             result["structure"]["headings"],
             [
-                {"text": "Abstract", "level": 2, "paragraphId": "h1"},
-                {"text": "1 Introduction", "level": 1, "paragraphId": "h2"},
-                {"text": "2.1 Participants", "level": 2, "paragraphId": "h3"},
+                {"text": "Abstract", "level": 2, "nodeId": "h1", "paragraphId": "h1"},
+                {"text": "1 Introduction", "level": 1, "nodeId": "h2", "paragraphId": "h2"},
+                {"text": "2.1 Participants", "level": 2, "nodeId": "h3", "paragraphId": "h3"},
             ],
         )
 
@@ -181,8 +181,8 @@ class DocumentAnalyticsTests(unittest.TestCase):
         self.assertEqual(
             result["structure"]["headings"],
             [
-                {"text": "1 Introduction", "level": 1, "paragraphId": "p1"},
-                {"text": "2.1 Methodology", "level": 2, "paragraphId": "p3"},
+                {"text": "1 Introduction", "level": 1, "nodeId": None, "paragraphId": "p1"},
+                {"text": "2.1 Methodology", "level": 2, "nodeId": None, "paragraphId": "p3"},
             ],
         )
 

@@ -40,6 +40,7 @@ export interface RepetitionAnalytics {
 export interface StructureHeading {
   text: string;
   level: number;
+  nodeId?: string | null;
   paragraphId?: string | null;
 }
 
