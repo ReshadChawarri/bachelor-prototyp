@@ -1,10 +1,19 @@
 import { useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { calculateLocalWritingAnalytics } from "../analytics/localAnalytics";
 import type { ParagraphLengthMetric } from "../analytics/localAnalytics";
+import type {
+  BackendAnalyticsState,
+  DocumentAnalyticsResponse,
+  RepetitionAnalytics,
+  TransitionAnalytics,
+  DocumentStructureAnalytics,
+} from "../types/backendAnalytics";
 import type { DocumentModel, ParagraphBlock } from "../types/document";
 
 interface WritingAnalyticsPanelProps {
   document: DocumentModel;
+  backendAnalytics: BackendAnalyticsState;
   revision: number;
   selectedParagraph?: ParagraphBlock;
   selectedParagraphId: string | null;
@@ -12,6 +21,7 @@ interface WritingAnalyticsPanelProps {
 
 export function WritingAnalyticsPanel({
   document,
+  backendAnalytics,
   revision,
   selectedParagraph,
   selectedParagraphId,
@@ -29,6 +39,8 @@ export function WritingAnalyticsPanel({
     [analytics.paragraphLengths, selectedParagraphId],
   );
   const selectedParagraphLength = paragraphRows.find((paragraph) => paragraph.isSelected);
+  const currentBackendAnalytics =
+    backendAnalytics.data?.revision === document.revision ? backendAnalytics.data : null;
 
   return (
     <div className="panel-content">
@@ -108,6 +120,24 @@ export function WritingAnalyticsPanel({
         </div>
       </section>
 
+      <TransitionWordsSection
+        analytics={currentBackendAnalytics}
+        loading={backendAnalytics.loading}
+        error={backendAnalytics.error}
+      />
+
+      <RepetitionSection
+        analytics={currentBackendAnalytics}
+        loading={backendAnalytics.loading}
+        error={backendAnalytics.error}
+      />
+
+      <DocumentStructureSection
+        analytics={currentBackendAnalytics}
+        loading={backendAnalytics.loading}
+        error={backendAnalytics.error}
+      />
+
       <dl className="panel-facts debug-facts">
         <div>
           <dt>Frontend revision</dt>
@@ -137,6 +167,173 @@ function MetricCard({ label, value }: { label: string; value: number | string })
 
 function formatAverage(value: number): string {
   return value === 0 ? "0" : value.toFixed(1);
+}
+
+function TransitionWordsSection({
+  analytics,
+  loading,
+  error,
+}: {
+  analytics: DocumentAnalyticsResponse | null;
+  loading: boolean;
+  error: string | null;
+}) {
+  return (
+    <section className="analytics-section" aria-label="Transition words">
+      <h3>Transition Words</h3>
+      <BackendSectionState loading={loading} error={error} analytics={analytics}>
+        {(current) => <TransitionWordsContent transitions={current.transitions} />}
+      </BackendSectionState>
+    </section>
+  );
+}
+
+function TransitionWordsContent({ transitions }: { transitions: TransitionAnalytics }) {
+  const maxCategoryCount = Math.max(1, ...transitions.categories.map((category) => category.count));
+
+  if (transitions.total === 0) {
+    return <p className="analytics-empty">No transition words detected.</p>;
+  }
+
+  return (
+    <div className="analytics-count-list">
+      <div className="analytics-total-row">
+        <span>Total</span>
+        <strong>{transitions.total}</strong>
+      </div>
+      {transitions.categories.map((category) => (
+        <CountBarRow
+          key={category.name}
+          label={category.name}
+          count={category.count}
+          maxCount={maxCategoryCount}
+          fillClassName="transition-fill"
+        />
+      ))}
+    </div>
+  );
+}
+
+function RepetitionSection({
+  analytics,
+  loading,
+  error,
+}: {
+  analytics: DocumentAnalyticsResponse | null;
+  loading: boolean;
+  error: string | null;
+}) {
+  return (
+    <section className="analytics-section" aria-label="Repetition">
+      <h3>Repetition</h3>
+      <BackendSectionState loading={loading} error={error} analytics={analytics}>
+        {(current) => <RepetitionContent repetition={current.repetition} />}
+      </BackendSectionState>
+    </section>
+  );
+}
+
+function RepetitionContent({ repetition }: { repetition: RepetitionAnalytics }) {
+  const maxTermCount = Math.max(1, ...repetition.terms.map((term) => term.count));
+
+  if (repetition.terms.length === 0) {
+    return <p className="analytics-empty">No notable repetition detected.</p>;
+  }
+
+  return (
+    <div className="analytics-count-list">
+      {repetition.terms.map((term) => (
+        <CountBarRow
+          key={term.term}
+          label={term.term}
+          count={term.count}
+          maxCount={maxTermCount}
+          fillClassName="repetition-fill"
+        />
+      ))}
+    </div>
+  );
+}
+
+function DocumentStructureSection({
+  analytics,
+  loading,
+  error,
+}: {
+  analytics: DocumentAnalyticsResponse | null;
+  loading: boolean;
+  error: string | null;
+}) {
+  return (
+    <section className="analytics-section" aria-label="Document structure">
+      <h3>Document Structure</h3>
+      <BackendSectionState loading={loading} error={error} analytics={analytics}>
+        {(current) => <DocumentStructureContent structure={current.structure} />}
+      </BackendSectionState>
+    </section>
+  );
+}
+
+function DocumentStructureContent({ structure }: { structure: DocumentStructureAnalytics }) {
+  if (structure.headings.length === 0) {
+    return <p className="analytics-empty">No document headings detected.</p>;
+  }
+
+  return (
+    <ol className="document-structure-list">
+      {structure.headings.map((heading, index) => (
+        <li
+          key={`${heading.paragraphId ?? "heading"}-${index}`}
+          className={`document-structure-item level-${Math.min(Math.max(heading.level, 1), 3)}`}
+          data-paragraph-id={heading.paragraphId ?? undefined}
+        >
+          {heading.text}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function BackendSectionState({
+  loading,
+  error,
+  analytics,
+  children,
+}: {
+  loading: boolean;
+  error: string | null;
+  analytics: DocumentAnalyticsResponse | null;
+  children: (analytics: DocumentAnalyticsResponse) => ReactNode;
+}) {
+  if (error) {
+    return <p className="analytics-empty">{error}</p>;
+  }
+  if (loading || !analytics) {
+    return <p className="analytics-empty">Updating...</p>;
+  }
+  return <>{children(analytics)}</>;
+}
+
+function CountBarRow({
+  label,
+  count,
+  maxCount,
+  fillClassName,
+}: {
+  label: string;
+  count: number;
+  maxCount: number;
+  fillClassName: string;
+}) {
+  return (
+    <div className="analytics-count-row">
+      <span className="analytics-count-label">{label}</span>
+      <div className="analytics-bar-track" aria-hidden="true">
+        <span className={`analytics-bar-fill ${fillClassName}`} style={{ width: barWidthPercent(count, maxCount) }} />
+      </div>
+      <span className="analytics-bar-value">{count}</span>
+    </div>
+  );
 }
 
 function SelectedParagraphLengthView({

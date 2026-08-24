@@ -6,11 +6,13 @@ import { serializeDocument } from "./serializer";
 import { EditorToolbar } from "./EditorToolbar";
 import { WritingAnalyticsPanel } from "../panels/WritingAnalyticsPanel";
 import { AiWritingPanel } from "../panels/AiWritingPanel";
+import type { BackendAnalyticsState } from "../types/backendAnalytics";
 import type { DocumentModel, EditorSelection, ImportRequest, ParagraphBlock } from "../types/document";
 
 interface DocumentWorkspaceProps {
   title: string;
   document: DocumentModel;
+  backendAnalytics: BackendAnalyticsState;
   importRequest: ImportRequest | null;
   leftPanelOpen: boolean;
   rightPanelOpen: boolean;
@@ -31,6 +33,7 @@ const INITIAL_CONTENT = `
 export function DocumentWorkspace({
   title,
   document,
+  backendAnalytics,
   importRequest,
   leftPanelOpen,
   rightPanelOpen,
@@ -103,6 +106,7 @@ export function DocumentWorkspace({
         {leftPanelOpen && (
           <WritingAnalyticsPanel
             document={document}
+            backendAnalytics={backendAnalytics}
             revision={revisionRef.current}
             selectedParagraph={selectedParagraph}
             selectedParagraphId={selection.paragraphId}
