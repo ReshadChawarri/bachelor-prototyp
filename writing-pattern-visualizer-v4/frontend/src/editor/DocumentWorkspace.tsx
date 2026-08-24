@@ -10,6 +10,7 @@ import type { DocumentModel, EditorSelection, ImportRequest, ParagraphBlock } fr
 
 interface DocumentWorkspaceProps {
   title: string;
+  document: DocumentModel;
   importRequest: ImportRequest | null;
   leftPanelOpen: boolean;
   rightPanelOpen: boolean;
@@ -29,6 +30,7 @@ const INITIAL_CONTENT = `
 
 export function DocumentWorkspace({
   title,
+  document,
   importRequest,
   leftPanelOpen,
   rightPanelOpen,
@@ -100,6 +102,7 @@ export function DocumentWorkspace({
         </button>
         {leftPanelOpen && (
           <WritingAnalyticsPanel
+            document={document}
             revision={revisionRef.current}
             selectedParagraph={selectedParagraph}
             selectedParagraphId={selection.paragraphId}

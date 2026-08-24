@@ -118,6 +118,7 @@ function App() {
 
       <DocumentWorkspace
         title={documentTitle}
+        document={documentModel}
         importRequest={importRequest}
         leftPanelOpen={leftPanelOpen}
         rightPanelOpen={rightPanelOpen}
