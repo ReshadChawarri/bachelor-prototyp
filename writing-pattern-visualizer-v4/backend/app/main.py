@@ -7,6 +7,12 @@ from .document_analytics import (
     DocumentAnalyticsResponse,
     analyze_document,
 )
+from .paragraph_ai_analysis import (
+    ParagraphAIAnalysisError,
+    ParagraphAIAnalysisService,
+    ParagraphAnalysisRequest,
+    ParagraphAnalysisResponse,
+)
 from .pdf_import import PdfImportError, PdfImportResponse, extract_pdf_content
 
 
@@ -59,3 +65,15 @@ async def import_pdf(file: UploadFile = File(...)) -> PdfImportResponse:
 @app.post("/api/analytics/document", response_model=DocumentAnalyticsResponse)
 def document_analytics(request: DocumentAnalyticsRequest) -> DocumentAnalyticsResponse:
     return analyze_document(request)
+
+
+@app.post("/api/ai/analyze-paragraph", response_model=ParagraphAnalysisResponse)
+def analyze_paragraph(request: ParagraphAnalysisRequest) -> ParagraphAnalysisResponse:
+    service = getattr(app.state, "paragraph_ai_analysis_service", None)
+    if service is None:
+        service = ParagraphAIAnalysisService()
+
+    try:
+        return service.analyze(request)
+    except ParagraphAIAnalysisError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.user_message) from exc

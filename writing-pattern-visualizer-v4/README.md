@@ -1,8 +1,8 @@
 # Writing Pattern Visualizer V4
 
-Phase 2 technical foundation for a React/TypeScript writing workspace with editable PDF import and a FastAPI backend.
+Phase 5A technical foundation for a React/TypeScript writing workspace, deterministic writing analytics, editable PDF import, and paragraph-level AI writing analysis through a FastAPI backend.
 
-V4 is intentionally created in parallel to the existing V3 Streamlit prototype. Phase 2 adds text-based PDF import only. It does not implement local analytics, OpenAI integration, AI analysis, revision generation, databases, API keys, OCR, or evaluation logging.
+V4 is intentionally created in parallel to the existing V3 Streamlit prototype. Phase 5A adds OpenAI-backed semantic analysis for the currently selected prose paragraph only. It does not implement whole-document AI analysis, AI rewriting, revision generation, databases, OCR, or evaluation logging.
 
 ## Phase 1 Scope
 
@@ -26,6 +26,17 @@ V4 is intentionally created in parallel to the existing V3 Streamlit prototype. 
 - Loads extracted text into TipTap as normal editable paragraph and heading nodes.
 - Preserves the existing document if import fails.
 - Does not add OCR, image extraction, exact layout reproduction, complex table handling, formulas, analytics, or AI behavior.
+
+## Phase 5A Scope
+
+- Adds `POST /api/ai/analyze-paragraph` in the FastAPI backend.
+- Uses the OpenAI Responses API from the backend only.
+- Reads `OPENAI_API_KEY` and `OPENAI_MODEL` from backend environment variables.
+- Defaults the backend model to `gpt-5.6-luna`.
+- Analyzes only the currently selected prose paragraph plus minimal local context.
+- Displays paragraph role, rhetorical moves, coherence, academic tone, and one concise observation.
+- Does not rewrite, correct, grade, score, or modify the document.
+- Does not expose the OpenAI API key to the frontend.
 
 ## Frontend Setup
 
@@ -65,6 +76,15 @@ python -m pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
+For local AI analysis, create a backend `.env` or export these variables before starting `uvicorn`:
+
+```bash
+export OPENAI_API_KEY=sk-your-development-key
+export OPENAI_MODEL=gpt-5.6-luna
+```
+
+The repository includes `backend/.env.example` with placeholders only. Real `.env` files are gitignored.
+
 The backend health endpoint is:
 
 ```text
@@ -89,6 +109,14 @@ POST /api/import/pdf
 
 The endpoint accepts a multipart `.pdf` upload and returns extracted editable text blocks. Phase 2 supports text-based PDFs only. OCR, image extraction, exact layout reproduction, complex tables, and mathematical formula reconstruction are intentionally out of scope.
 
+## Paragraph AI Analysis Endpoint
+
+```text
+POST /api/ai/analyze-paragraph
+```
+
+The endpoint accepts the selected paragraph, nearest heading, previous prose paragraph, and next prose paragraph. It returns validated structured analysis only. The endpoint does not accept full TipTap JSON and does not modify documents.
+
 ## Backend Tests
 
 ```bash
@@ -99,10 +127,8 @@ python -m unittest discover -s tests -v
 
 ## Current Limitations
 
-- Placeholder panels only
-- No deterministic analytics service yet
-- No OpenAI API usage
-- No AI writing analysis
+- Whole-document AI analysis is not implemented yet
+- AI rewriting and Accept/Reject revision suggestions are not implemented
 - No paragraph revision suggestions
 - No database or persistence
 - No evaluation logging
