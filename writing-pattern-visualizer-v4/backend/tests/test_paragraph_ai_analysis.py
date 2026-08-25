@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import os
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from app.config import AppSettings
+from app.config import DEFAULT_OPENAI_MODEL, AppSettings, get_settings
 from app.main import app
 from app.paragraph_ai_analysis import (
     OpenAIResponsesParagraphClient,
@@ -165,8 +166,35 @@ class ParagraphAIAnalysisEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json()["detail"], "AI analysis is not configured.")
 
+    def test_health_reports_safe_ai_configuration_status_without_secret(self):
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "", "OPENAI_MODEL": "gpt-5.6-luna"}, clear=False):
+            response = self.client.get("/api/health")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertFalse(body["aiConfigured"])
+        self.assertEqual(body["openaiModel"], "gpt-5.6-luna")
+        self.assertNotIn("OPENAI_API_KEY", body)
+        self.assertNotIn("sk-", str(body))
+
 
 class ParagraphAIAnalysisServiceTests(unittest.TestCase):
+    def test_settings_default_model_and_empty_key(self):
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "", "OPENAI_MODEL": ""}, clear=False):
+            settings = get_settings()
+
+        self.assertIsNone(settings.openai_api_key)
+        self.assertFalse(settings.ai_configured)
+        self.assertEqual(settings.openai_model, DEFAULT_OPENAI_MODEL)
+
+    def test_settings_recognize_fake_key_and_model_override(self):
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test-placeholder", "OPENAI_MODEL": "gpt-test-model"}, clear=False):
+            settings = get_settings()
+
+        self.assertTrue(settings.ai_configured)
+        self.assertEqual(settings.openai_api_key, "sk-test-placeholder")
+        self.assertEqual(settings.openai_model, "gpt-test-model")
+
     def test_configured_model_is_used(self):
         request = ParagraphAnalysisRequest.model_validate(request_payload())
         fake_raw_client = FakeOpenAIClient(valid_analysis())

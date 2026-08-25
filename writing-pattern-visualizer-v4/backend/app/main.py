@@ -2,6 +2,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from .config import get_settings
 from .document_analytics import (
     DocumentAnalyticsRequest,
     DocumentAnalyticsResponse,
@@ -20,6 +21,8 @@ class HealthResponse(BaseModel):
     status: str
     service: str
     phase: str
+    aiConfigured: bool
+    openaiModel: str
 
 
 app = FastAPI(
@@ -42,10 +45,13 @@ app.add_middleware(
 
 @app.get("/api/health", response_model=HealthResponse)
 def health() -> HealthResponse:
+    settings = get_settings()
     return HealthResponse(
         status="ok",
         service="writing-pattern-visualizer-v4-backend",
-        phase="phase-2",
+        phase="phase-5a",
+        aiConfigured=settings.ai_configured,
+        openaiModel=settings.openai_model,
     )
 
 

@@ -76,14 +76,24 @@ python -m pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
-For local AI analysis, create a backend `.env` or export these variables before starting `uvicorn`:
+## OpenAI Local Setup
 
-```bash
-export OPENAI_API_KEY=sk-your-development-key
-export OPENAI_MODEL=gpt-5.6-luna
+The backend already includes a local `backend/.env` file for development. To enable Phase 5A AI paragraph analysis:
+
+1. Install backend dependencies with the command above.
+2. Open `writing-pattern-visualizer-v4/backend/.env`.
+3. Set:
+
+```text
+OPENAI_API_KEY=<your key>
+OPENAI_MODEL=gpt-5.6-luna
 ```
 
-The repository includes `backend/.env.example` with placeholders only. Real `.env` files are gitignored.
+4. Restart the FastAPI backend.
+5. Start or refresh the frontend.
+6. Select a prose paragraph in the editor.
+
+The local `.env` file is ignored by Git. The repository includes `backend/.env.example` with placeholders only. Never commit an API key.
 
 The backend health endpoint is:
 
@@ -97,7 +107,9 @@ Expected response:
 {
   "status": "ok",
   "service": "writing-pattern-visualizer-v4-backend",
-  "phase": "phase-2"
+  "phase": "phase-5a",
+  "aiConfigured": false,
+  "openaiModel": "gpt-5.6-luna"
 }
 ```
 
