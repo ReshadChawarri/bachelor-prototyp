@@ -17,6 +17,7 @@ from app.paragraph_ai_analysis import (
     ParagraphAIAnalysisService,
     ParagraphAIConfigurationError,
     ParagraphAIInvalidResponseError,
+    ParagraphAIUpstreamError,
     ParagraphAnalysisRequest,
     ParagraphAnalysisResponse,
     build_paragraph_analysis_prompt,
@@ -95,6 +96,22 @@ class FakeResponses:
 class FakeOpenAIClient:
     def __init__(self, parsed):
         self.responses = FakeResponses(parsed)
+
+
+class FakeOpenAIUpstreamError(Exception):
+    status_code = 503
+    code = "server_unavailable"
+    type = "server_error"
+
+
+class FakeFailingResponses:
+    def parse(self, **kwargs):
+        raise FakeOpenAIUpstreamError("Upstream failed for sk-test-secret1234567890 and sk-proj-0-")
+
+
+class FakeFailingOpenAIClient:
+    def __init__(self):
+        self.responses = FakeFailingResponses()
 
 
 class ParagraphAIAnalysisEndpointTests(unittest.TestCase):
@@ -262,6 +279,28 @@ class ParagraphAIAnalysisServiceTests(unittest.TestCase):
             service.analyze(ParagraphAnalysisRequest.model_validate(request_payload()))
 
         self.assertNotIn("sk-", str(exc.exception))
+
+    def test_upstream_failure_logs_safe_diagnostic_details(self):
+        request = ParagraphAnalysisRequest.model_validate(request_payload())
+        client = OpenAIResponsesParagraphClient(
+            settings=AppSettings(openai_api_key="sk-test-secret1234567890", openai_model="gpt-5.6-luna"),
+            raw_client=FakeFailingOpenAIClient(),
+        )
+
+        with self.assertLogs("app.paragraph_ai_analysis", level="WARNING") as captured:
+            with self.assertRaises(ParagraphAIUpstreamError):
+                client.analyze(request, "gpt-5.6-luna")
+
+        log_output = "\n".join(captured.output)
+        self.assertIn("stage=responses_api_request", log_output)
+        self.assertIn("FakeOpenAIUpstreamError", log_output)
+        self.assertIn("upstream_status=503", log_output)
+        self.assertIn("openai_error_code=server_unavailable", log_output)
+        self.assertIn("openai_error_type=server_error", log_output)
+        self.assertIn("model=gpt-5.6-luna", log_output)
+        self.assertIn("api_key_configured=True", log_output)
+        self.assertNotIn("sk-test-secret", log_output)
+        self.assertNotIn("sk-proj", log_output)
 
 
 if __name__ == "__main__":
