@@ -565,6 +565,142 @@ button.document-structure-item:hover,
   color: #5c6673;
 }
 
+.ai-tab-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.3rem;
+  margin: 0.9rem 0 1rem;
+  padding: 0.2rem;
+  border-radius: 6px;
+  background: #eef2f5;
+}
+
+.ai-tab {
+  min-width: 0;
+  padding: 0.35rem 0.45rem;
+  border-radius: 5px;
+  color: #4e5966;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.ai-tab.active {
+  background: #ffffff;
+  color: #26313b;
+  box-shadow: 0 1px 2px rgb(60 64 67 / 12%);
+}
+
+.ai-tab.disabled {
+  color: #87909b;
+}
+
+.ai-analysis-panel {
+  margin-top: 0.9rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid #edf0f3;
+}
+
+.ai-analysis-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.ai-analysis-heading-row h3 {
+  margin: 0;
+  color: #303640;
+  font-size: 0.92rem;
+}
+
+.reanalyze-button {
+  padding: 0.1rem 0;
+  color: #2f6f8f;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.reanalyze-button:hover {
+  color: #1f566f;
+  text-decoration: underline;
+}
+
+.ai-result-stack {
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 0.8rem;
+}
+
+.ai-result-section h4 {
+  margin: 0 0 0.35rem;
+  color: #303640;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ai-result-section p {
+  margin: 0.35rem 0 0;
+  color: #4e5966;
+  font-size: 0.82rem;
+  line-height: 1.42;
+}
+
+.ai-qualitative-label,
+.ai-chip {
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+  align-items: center;
+  border-radius: 999px;
+  background: #eef6f8;
+  color: #2e5c71;
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.ai-qualitative-label {
+  padding: 0.22rem 0.48rem;
+}
+
+.ai-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.ai-chip {
+  padding: 0.22rem 0.48rem;
+}
+
+.ai-analysis-metadata {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.25rem 0 0;
+  padding-top: 0.65rem;
+  border-top: 1px solid #edf0f3;
+}
+
+.ai-analysis-metadata div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.ai-analysis-metadata dt,
+.ai-analysis-metadata dd {
+  margin: 0;
+  color: #66717e;
+  font-size: 0.74rem;
+  line-height: 1.25;
+}
+
+.ai-analysis-metadata dd {
+  color: #303640;
+  text-align: right;
+}
+
 .panel-facts {
   display: grid;
   gap: 0.8rem;

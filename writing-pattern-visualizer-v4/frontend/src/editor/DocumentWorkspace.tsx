@@ -257,7 +257,11 @@ export function DocumentWorkspace({
           {rightPanelOpen ? ">" : "<"}
         </button>
         {rightPanelOpen && (
-          <AiWritingPanel selectedParagraph={selectedParagraph} selectedParagraphId={selection.paragraphId} />
+          <AiWritingPanel
+            document={document}
+            selectedParagraph={selectedParagraph}
+            selectedParagraphId={selection.paragraphId}
+          />
         )}
       </aside>
     </main>
