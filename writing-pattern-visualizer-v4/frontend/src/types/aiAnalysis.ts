@@ -86,3 +86,72 @@ export interface ParagraphAIRequestIdentity {
   paragraphId: string;
   cacheKey: string;
 }
+
+export type DocumentAIBlock =
+  | {
+      type: "heading";
+      nodeId: string;
+      order: number;
+      text: string;
+      headingLevel: number;
+      blockType: "heading";
+    }
+  | {
+      type: "paragraph";
+      paragraphId: string;
+      order: number;
+      displayIndex: number;
+      text: string;
+      blockType: "paragraph";
+    };
+
+export interface AnalyzeDocumentRequest {
+  documentId: string;
+  revision: number;
+  requestId: string;
+  language: AnalyticsLanguage;
+  blocks: DocumentAIBlock[];
+}
+
+export interface DocumentParagraphRole {
+  paragraphId: string;
+  role: ParagraphRoleLabel;
+  rationale?: string | null;
+}
+
+export interface RhetoricalMoveDistribution {
+  label: RhetoricalMoveLabel;
+  count: number;
+  paragraphIds: string[];
+}
+
+export interface DocumentAIAnalysis {
+  paragraphRoles: DocumentParagraphRole[];
+  rhetoricalMoves: RhetoricalMoveDistribution[];
+  coherence: {
+    level: CoherenceLevel;
+    rationale: string;
+  };
+  academicTone: {
+    level: AcademicToneLevel;
+    rationale: string;
+  };
+  observation: string;
+}
+
+export interface AnalyzeDocumentResponse {
+  documentId: string;
+  revision: number;
+  requestId: string;
+  model: string;
+  analysisVersion: string;
+  analyzedParagraphCount: number;
+  analysis: DocumentAIAnalysis;
+}
+
+export interface DocumentAIRequestIdentity {
+  documentId: string;
+  revision: number;
+  requestId: string;
+  cacheKey: string;
+}

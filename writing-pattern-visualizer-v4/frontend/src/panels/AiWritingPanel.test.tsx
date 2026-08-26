@@ -1,14 +1,22 @@
 import { act, render, screen } from "@testing-library/react";
+import { fireEvent } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { analyzeParagraph } from "../api/aiAnalysis";
-import type { AnalyzeParagraphRequest, AnalyzeParagraphResponse } from "../types/aiAnalysis";
+import { analyzeDocument, analyzeParagraph } from "../api/aiAnalysis";
+import type {
+  AnalyzeDocumentRequest,
+  AnalyzeDocumentResponse,
+  AnalyzeParagraphRequest,
+  AnalyzeParagraphResponse,
+} from "../types/aiAnalysis";
 import type { DocumentModel, ParagraphBlock } from "../types/document";
 import { AiWritingPanel } from "./AiWritingPanel";
 
 vi.mock("../api/aiAnalysis", () => ({
+  analyzeDocument: vi.fn(),
   analyzeParagraph: vi.fn(),
 }));
 
+const mockedAnalyzeDocument = vi.mocked(analyzeDocument);
 const mockedAnalyzeParagraph = vi.mocked(analyzeParagraph);
 
 async function advanceAIAnalysisDebounce() {
@@ -71,9 +79,40 @@ function responseFor(request: AnalyzeParagraphRequest): AnalyzeParagraphResponse
   };
 }
 
+function documentResponseFor(request: AnalyzeDocumentRequest): AnalyzeDocumentResponse {
+  return {
+    documentId: request.documentId,
+    revision: request.revision,
+    requestId: request.requestId,
+    model: "gpt-5.6-luna",
+    analysisVersion: "document-v1",
+    analyzedParagraphCount: 2,
+    analysis: {
+      paragraphRoles: [
+        { paragraphId: "p-1", role: "background_context", rationale: "Introduces context." },
+        { paragraphId: "p-2", role: "claim_argument", rationale: "States a contrast." },
+      ],
+      rhetoricalMoves: [
+        { label: "background", count: 1, paragraphIds: ["p-1"] },
+        { label: "claim", count: 1, paragraphIds: ["p-2"] },
+      ],
+      coherence: {
+        level: "moderate",
+        rationale: "The document moves from context to claim.",
+      },
+      academicTone: {
+        level: "strong",
+        rationale: "The register is formal.",
+      },
+      observation: "The document develops a compact academic progression.",
+    },
+  };
+}
+
 describe("AiWritingPanel", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    mockedAnalyzeDocument.mockImplementation(async (request) => documentResponseFor(request));
     mockedAnalyzeParagraph.mockImplementation(async (request) => responseFor(request));
   });
 
@@ -92,7 +131,7 @@ describe("AiWritingPanel", () => {
     );
 
     expect(screen.getByRole("tab", { name: "Paragraph" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("tab", { name: "Document" })).toBeDisabled();
+    expect(screen.getByRole("tab", { name: "Document" })).not.toBeDisabled();
     expect(screen.getByText("Analyzing paragraph...")).toBeInTheDocument();
 
     await advanceAIAnalysisDebounce();
@@ -135,5 +174,83 @@ describe("AiWritingPanel", () => {
     await advanceAIAnalysisDebounce();
 
     expect(screen.getByText("AI analysis is not configured.")).toBeInTheDocument();
+  });
+
+  it("activates document analysis only after the explicit document action", async () => {
+    const onNavigateToParagraph = vi.fn();
+    render(
+      <AiWritingPanel
+        document={DOCUMENT}
+        selectedParagraph={DOCUMENT.paragraphs[1]}
+        selectedParagraphId="p-1"
+        onNavigateToParagraph={onNavigateToParagraph}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Document" }));
+
+    expect(screen.getByRole("tab", { name: "Document" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText(/Analyze the current document/)).toBeInTheDocument();
+    expect(mockedAnalyzeDocument).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Analyze document" }));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("Paragraph Roles")).toBeInTheDocument();
+    expect(screen.getByText("P1")).toBeInTheDocument();
+    expect(screen.getByText("Background / Context")).toBeInTheDocument();
+    expect(screen.getByText("Rhetorical Moves")).toBeInTheDocument();
+    expect(screen.getByText("The document develops a compact academic progression.")).toBeInTheDocument();
+    expect(mockedAnalyzeDocument).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /Background \/ Context/ }));
+    expect(onNavigateToParagraph).toHaveBeenCalledWith("p-1");
+  });
+
+  it("marks document analysis stale after editing and updates on request", async () => {
+    const { rerender } = render(
+      <AiWritingPanel
+        document={DOCUMENT}
+        selectedParagraph={DOCUMENT.paragraphs[1]}
+        selectedParagraphId="p-1"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Document" }));
+    fireEvent.click(screen.getByRole("button", { name: "Analyze document" }));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const editedDocument = {
+      ...DOCUMENT,
+      revision: 11,
+      paragraphs: [
+        DOCUMENT.paragraphs[0],
+        paragraph("p-1", "Privacy concerns shape academic arguments about data practices and consent.", 1),
+        DOCUMENT.paragraphs[2],
+      ],
+    };
+    rerender(
+      <AiWritingPanel
+        document={editedDocument}
+        selectedParagraph={editedDocument.paragraphs[1]}
+        selectedParagraphId="p-1"
+      />,
+    );
+
+    expect(screen.getByText("Document changed since this analysis.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Update analysis" }));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("Analysis based on Revision 11")).toBeInTheDocument();
+    expect(mockedAnalyzeDocument).toHaveBeenCalledTimes(2);
   });
 });
