@@ -406,7 +406,8 @@ button.analytics-bar-row:focus-visible,
 .clear-highlights-button:focus-visible,
 .document-structure-item:focus-visible,
 .reanalyze-button:focus-visible,
-.ai-role-row.interactive:focus-visible {
+.revision-action-button:focus-visible,
+.revision-decision-button:focus-visible {
   outline: 2px solid #8eb4c4;
   outline-offset: 2px;
 }
@@ -567,35 +568,6 @@ button.document-structure-item:hover,
   color: #5c6673;
 }
 
-.ai-tab-row {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.3rem;
-  margin: 0.9rem 0 1rem;
-  padding: 0.2rem;
-  border-radius: 6px;
-  background: #eef2f5;
-}
-
-.ai-tab {
-  min-width: 0;
-  padding: 0.35rem 0.45rem;
-  border-radius: 5px;
-  color: #4e5966;
-  font-size: 0.82rem;
-  font-weight: 700;
-}
-
-.ai-tab.active {
-  background: #ffffff;
-  color: #26313b;
-  box-shadow: 0 1px 2px rgb(60 64 67 / 12%);
-}
-
-.ai-tab.disabled {
-  color: #87909b;
-}
-
 .ai-analysis-panel {
   margin-top: 0.9rem;
   padding-top: 0.85rem;
@@ -625,17 +597,6 @@ button.document-structure-item:hover,
 .reanalyze-button:hover {
   color: #1f566f;
   text-decoration: underline;
-}
-
-.ai-stale-note {
-  margin: 0;
-  padding: 0.5rem 0.6rem;
-  border: 1px solid #eadfbd;
-  border-radius: 6px;
-  background: #fff9e8;
-  color: #695a32;
-  font-size: 0.78rem;
-  line-height: 1.35;
 }
 
 .ai-result-stack {
@@ -687,68 +648,107 @@ button.document-structure-item:hover,
   padding: 0.22rem 0.48rem;
 }
 
-.ai-role-list,
-.ai-move-distribution {
+.revision-action-stack {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.revision-action-grid {
   display: grid;
   gap: 0.4rem;
 }
 
-.ai-role-row {
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
-  align-items: center;
-  gap: 0.45rem;
+.revision-action-button {
   width: 100%;
-  min-width: 0;
-  padding: 0.16rem 0.2rem;
-  border-radius: 5px;
-  color: #4e5966;
+  padding: 0.42rem 0.5rem;
+  border: 1px solid #dbe3ea;
+  border-radius: 6px;
+  background: #fbfcfd;
+  color: #2f4f61;
+  font-size: 0.78rem;
+  font-weight: 700;
   text-align: left;
 }
 
-.ai-role-row.interactive:hover {
+.revision-action-button:hover {
   background: #f1f6f8;
 }
 
-.ai-role-row span,
-.ai-role-row strong {
-  min-width: 0;
-  overflow: hidden;
-  font-size: 0.78rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.revision-suggestion-card {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.65rem;
+  border: 1px solid #dbe3ea;
+  border-radius: 6px;
+  background: #fbfcfd;
 }
 
-.ai-role-row span {
-  color: #64717f;
+.revision-action-label,
+.revision-summary {
+  margin: 0;
+  color: #4e5966;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.revision-action-label {
+  color: #303640;
   font-weight: 700;
 }
 
-.ai-role-row strong {
+.revision-diff-preview {
+  max-height: 170px;
+  margin: 0;
+  overflow-y: auto;
   color: #303640;
+  font-size: 0.82rem;
+  line-height: 1.5;
 }
 
-.ai-move-row {
-  display: grid;
-  grid-template-columns: minmax(76px, 1fr) minmax(0, 1fr) 28px;
-  align-items: center;
+.revision-diff-segment.insert {
+  border-radius: 3px;
+  background: #e7f3ec;
+  color: #24583a;
+}
+
+.revision-diff-segment.delete {
+  border-radius: 3px;
+  background: #f8e9e6;
+  color: #8a3f35;
+  text-decoration: line-through;
+}
+
+.revision-decision-row {
+  display: flex;
+  justify-content: flex-end;
   gap: 0.45rem;
 }
 
-.ai-move-row span,
-.ai-move-row strong {
-  min-width: 0;
-  overflow: hidden;
-  color: #4e5966;
+.revision-decision-button {
+  padding: 0.32rem 0.62rem;
+  border-radius: 6px;
   font-size: 0.78rem;
   font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.ai-move-row strong {
-  color: #303640;
-  text-align: right;
+.revision-decision-button.secondary {
+  border-color: #dbe3ea;
+  background: #ffffff;
+  color: #4e5966;
+}
+
+.revision-decision-button.primary {
+  border-color: #2f6f8f;
+  background: #2f6f8f;
+  color: #ffffff;
+}
+
+.revision-decision-button.secondary:hover {
+  background: #f1f6f8;
+}
+
+.revision-decision-button.primary:hover {
+  background: #255a74;
 }
 
 .ai-analysis-metadata {

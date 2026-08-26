@@ -1,27 +1,34 @@
 import { act, render, screen } from "@testing-library/react";
 import { fireEvent } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { analyzeDocument, analyzeParagraph } from "../api/aiAnalysis";
+import { analyzeParagraph, suggestRevision } from "../api/aiAnalysis";
 import type {
-  AnalyzeDocumentRequest,
-  AnalyzeDocumentResponse,
   AnalyzeParagraphRequest,
   AnalyzeParagraphResponse,
+  SuggestRevisionRequest,
+  SuggestRevisionResponse,
 } from "../types/aiAnalysis";
 import type { DocumentModel, ParagraphBlock } from "../types/document";
 import { AiWritingPanel } from "./AiWritingPanel";
 
 vi.mock("../api/aiAnalysis", () => ({
-  analyzeDocument: vi.fn(),
   analyzeParagraph: vi.fn(),
+  suggestRevision: vi.fn(),
 }));
 
-const mockedAnalyzeDocument = vi.mocked(analyzeDocument);
 const mockedAnalyzeParagraph = vi.mocked(analyzeParagraph);
+const mockedSuggestRevision = vi.mocked(suggestRevision);
 
 async function advanceAIAnalysisDebounce() {
   await act(async () => {
     vi.advanceTimersByTime(1400);
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
+async function flushPromises() {
+  await act(async () => {
     await Promise.resolve();
     await Promise.resolve();
   });
@@ -79,32 +86,19 @@ function responseFor(request: AnalyzeParagraphRequest): AnalyzeParagraphResponse
   };
 }
 
-function documentResponseFor(request: AnalyzeDocumentRequest): AnalyzeDocumentResponse {
+function revisionResponseFor(request: SuggestRevisionRequest): SuggestRevisionResponse {
   return {
     documentId: request.documentId,
-    revision: request.revision,
+    sourceRevision: request.revision,
     requestId: request.requestId,
+    paragraphId: request.paragraph.paragraphId,
+    sourceContentHash: request.sourceContentHash,
+    action: request.action,
     model: "gpt-5.6-luna",
-    analysisVersion: "document-v1",
-    analyzedParagraphCount: 2,
-    analysis: {
-      paragraphRoles: [
-        { paragraphId: "p-1", role: "background_context", rationale: "Introduces context." },
-        { paragraphId: "p-2", role: "claim_argument", rationale: "States a contrast." },
-      ],
-      rhetoricalMoves: [
-        { label: "background", count: 1, paragraphIds: ["p-1"] },
-        { label: "claim", count: 1, paragraphIds: ["p-2"] },
-      ],
-      coherence: {
-        level: "moderate",
-        rationale: "The document moves from context to claim.",
-      },
-      academicTone: {
-        level: "strong",
-        rationale: "The register is formal.",
-      },
-      observation: "The document develops a compact academic progression.",
+    revisionVersion: "paragraph-revision-v1",
+    suggestion: {
+      revisedText: "Privacy concerns shape academic arguments about responsible data practices.",
+      summary: "Clarifies the phrasing while preserving the central meaning.",
     },
   };
 }
@@ -112,8 +106,8 @@ function documentResponseFor(request: AnalyzeDocumentRequest): AnalyzeDocumentRe
 describe("AiWritingPanel", () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    mockedAnalyzeDocument.mockImplementation(async (request) => documentResponseFor(request));
     mockedAnalyzeParagraph.mockImplementation(async (request) => responseFor(request));
+    mockedSuggestRevision.mockImplementation(async (request) => revisionResponseFor(request));
   });
 
   afterEach(() => {
@@ -121,17 +115,11 @@ describe("AiWritingPanel", () => {
     vi.clearAllMocks();
   });
 
-  it("renders paragraph analysis results for the selected prose paragraph", async () => {
-    render(
-      <AiWritingPanel
-        document={DOCUMENT}
-        selectedParagraph={DOCUMENT.paragraphs[1]}
-        selectedParagraphId="p-1"
-      />,
-    );
+  it("renders paragraph analysis results for the selected prose paragraph without document-wide tabs", async () => {
+    render(<AiWritingPanel document={DOCUMENT} selectedParagraph={DOCUMENT.paragraphs[1]} selectedParagraphId="p-1" />);
 
-    expect(screen.getByRole("tab", { name: "Paragraph" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("tab", { name: "Document" })).not.toBeDisabled();
+    expect(screen.queryByRole("tab", { name: "Paragraph" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Document" })).not.toBeInTheDocument();
     expect(screen.getByText("Analyzing paragraph...")).toBeInTheDocument();
 
     await advanceAIAnalysisDebounce();
@@ -143,114 +131,153 @@ describe("AiWritingPanel", () => {
     expect(screen.getByText("Moderate")).toBeInTheDocument();
     expect(screen.getByText("Strong")).toBeInTheDocument();
     expect(screen.getByText("The paragraph develops a clear claim without rewriting the text.")).toBeInTheDocument();
+    expect(screen.getByText("Suggested Actions")).toBeInTheDocument();
     expect(mockedAnalyzeParagraph).toHaveBeenCalledTimes(1);
   });
 
   it("does not call AI when a heading is selected", async () => {
-    render(
-      <AiWritingPanel
-        document={DOCUMENT}
-        selectedParagraph={DOCUMENT.paragraphs[0]}
-        selectedParagraphId="h-1"
-      />,
-    );
+    render(<AiWritingPanel document={DOCUMENT} selectedParagraph={DOCUMENT.paragraphs[0]} selectedParagraphId="h-1" />);
 
     await advanceAIAnalysisDebounce();
 
     expect(screen.getByText("Select a paragraph to view AI writing analysis.")).toBeInTheDocument();
     expect(mockedAnalyzeParagraph).not.toHaveBeenCalled();
+    expect(mockedSuggestRevision).not.toHaveBeenCalled();
   });
 
-  it("shows a compact controlled error state", async () => {
+  it("shows a compact controlled paragraph-analysis error state", async () => {
     mockedAnalyzeParagraph.mockRejectedValueOnce(new Error("AI analysis is not configured."));
-    render(
-      <AiWritingPanel
-        document={DOCUMENT}
-        selectedParagraph={DOCUMENT.paragraphs[1]}
-        selectedParagraphId="p-1"
-      />,
-    );
+    render(<AiWritingPanel document={DOCUMENT} selectedParagraph={DOCUMENT.paragraphs[1]} selectedParagraphId="p-1" />);
 
     await advanceAIAnalysisDebounce();
 
     expect(screen.getByText("AI analysis is not configured.")).toBeInTheDocument();
   });
 
-  it("activates document analysis only after the explicit document action", async () => {
-    const onNavigateToParagraph = vi.fn();
+  it("requests an explicit clarity revision and renders the preview without applying it", async () => {
+    const onAcceptRevision = vi.fn();
     render(
       <AiWritingPanel
         document={DOCUMENT}
         selectedParagraph={DOCUMENT.paragraphs[1]}
         selectedParagraphId="p-1"
-        onNavigateToParagraph={onNavigateToParagraph}
+        onAcceptRevision={onAcceptRevision}
       />,
     );
 
-    fireEvent.click(screen.getByRole("tab", { name: "Document" }));
+    await advanceAIAnalysisDebounce();
+    fireEvent.click(screen.getByRole("button", { name: "Improve clarity" }));
+    expect(screen.getByText("Generating revision...")).toBeInTheDocument();
+    await flushPromises();
 
-    expect(screen.getByRole("tab", { name: "Document" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByText(/Analyze the current document/)).toBeInTheDocument();
-    expect(mockedAnalyzeDocument).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole("button", { name: "Analyze document" }));
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(screen.getByText("Paragraph Roles")).toBeInTheDocument();
-    expect(screen.getByText("P1")).toBeInTheDocument();
-    expect(screen.getByText("Background / Context")).toBeInTheDocument();
-    expect(screen.getByText("Rhetorical Moves")).toBeInTheDocument();
-    expect(screen.getByText("The document develops a compact academic progression.")).toBeInTheDocument();
-    expect(mockedAnalyzeDocument).toHaveBeenCalledTimes(1);
-
-    fireEvent.click(screen.getByRole("button", { name: /Background \/ Context/ }));
-    expect(onNavigateToParagraph).toHaveBeenCalledWith("p-1");
+    expect(mockedSuggestRevision).toHaveBeenCalledTimes(1);
+    expect(mockedSuggestRevision.mock.calls[0][0].action).toBe("improve_clarity");
+    expect(screen.getByText("Revision Suggestion")).toBeInTheDocument();
+    expect(screen.getByText("Clarifies the phrasing while preserving the central meaning.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Accept" })).toBeInTheDocument();
+    expect(onAcceptRevision).not.toHaveBeenCalled();
   });
 
-  it("marks document analysis stale after editing and updates on request", async () => {
-    const { rerender } = render(
+  it("uses the requested revision action", async () => {
+    render(<AiWritingPanel document={DOCUMENT} selectedParagraph={DOCUMENT.paragraphs[1]} selectedParagraphId="p-1" />);
+
+    await advanceAIAnalysisDebounce();
+    fireEvent.click(screen.getByRole("button", { name: "Improve academic tone" }));
+    await flushPromises();
+
+    expect(mockedSuggestRevision.mock.calls[0][0].action).toBe("improve_academic_tone");
+  });
+
+  it("does not send duplicate revision requests while loading", async () => {
+    mockedSuggestRevision.mockImplementationOnce(
+      () => new Promise(() => undefined),
+    );
+    render(<AiWritingPanel document={DOCUMENT} selectedParagraph={DOCUMENT.paragraphs[1]} selectedParagraphId="p-1" />);
+
+    await advanceAIAnalysisDebounce();
+    const button = screen.getByRole("button", { name: "Improve transition" });
+    fireEvent.click(button);
+    fireEvent.click(button);
+
+    expect(mockedSuggestRevision).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a suggestion without calling the accept handler", async () => {
+    const onAcceptRevision = vi.fn();
+    render(
       <AiWritingPanel
         document={DOCUMENT}
         selectedParagraph={DOCUMENT.paragraphs[1]}
         selectedParagraphId="p-1"
+        onAcceptRevision={onAcceptRevision}
       />,
     );
 
-    fireEvent.click(screen.getByRole("tab", { name: "Document" }));
-    fireEvent.click(screen.getByRole("button", { name: "Analyze document" }));
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    await advanceAIAnalysisDebounce();
+    fireEvent.click(screen.getByRole("button", { name: "Improve clarity" }));
+    await flushPromises();
+    fireEvent.click(screen.getByRole("button", { name: "Reject" }));
 
-    const editedDocument = {
-      ...DOCUMENT,
-      revision: 11,
-      paragraphs: [
-        DOCUMENT.paragraphs[0],
-        paragraph("p-1", "Privacy concerns shape academic arguments about data practices and consent.", 1),
-        DOCUMENT.paragraphs[2],
-      ],
-    };
-    rerender(
+    expect(onAcceptRevision).not.toHaveBeenCalled();
+    expect(screen.getByText("Suggested Actions")).toBeInTheDocument();
+  });
+
+  it("accepts a suggestion through the supplied editor callback", async () => {
+    const onAcceptRevision = vi.fn<(suggestion: SuggestRevisionResponse) => { applied: true }>(() => ({
+      applied: true,
+    }));
+    render(
       <AiWritingPanel
-        document={editedDocument}
-        selectedParagraph={editedDocument.paragraphs[1]}
+        document={DOCUMENT}
+        selectedParagraph={DOCUMENT.paragraphs[1]}
         selectedParagraphId="p-1"
+        onAcceptRevision={onAcceptRevision}
       />,
     );
 
-    expect(screen.getByText("Document changed since this analysis.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Update analysis" }));
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    await advanceAIAnalysisDebounce();
+    fireEvent.click(screen.getByRole("button", { name: "Improve clarity" }));
+    await flushPromises();
+    fireEvent.click(screen.getByRole("button", { name: "Accept" }));
 
-    expect(screen.getByText("Analysis based on Revision 11")).toBeInTheDocument();
-    expect(mockedAnalyzeDocument).toHaveBeenCalledTimes(2);
+    expect(onAcceptRevision).toHaveBeenCalledTimes(1);
+    expect(onAcceptRevision.mock.calls[0][0].paragraphId).toBe("p-1");
+    expect(screen.getByText("Suggested Actions")).toBeInTheDocument();
+  });
+
+  it("shows a stale-suggestion message when accept cannot apply safely", async () => {
+    const onAcceptRevision = vi.fn<(suggestion: SuggestRevisionResponse) => { applied: false; reason: "stale" }>(() => ({
+      applied: false,
+      reason: "stale",
+    }));
+    render(
+      <AiWritingPanel
+        document={DOCUMENT}
+        selectedParagraph={DOCUMENT.paragraphs[1]}
+        selectedParagraphId="p-1"
+        onAcceptRevision={onAcceptRevision}
+      />,
+    );
+
+    await advanceAIAnalysisDebounce();
+    fireEvent.click(screen.getByRole("button", { name: "Improve clarity" }));
+    await flushPromises();
+    fireEvent.click(screen.getByRole("button", { name: "Accept" }));
+
+    expect(screen.getByText("This paragraph changed after the suggestion was generated. Generate a new revision before applying it.")).toBeInTheDocument();
+  });
+
+  it("ignores stale revision responses after the selected paragraph changes", async () => {
+    const { rerender } = render(
+      <AiWritingPanel document={DOCUMENT} selectedParagraph={DOCUMENT.paragraphs[1]} selectedParagraphId="p-1" />,
+    );
+
+    await advanceAIAnalysisDebounce();
+    fireEvent.click(screen.getByRole("button", { name: "Improve clarity" }));
+
+    rerender(<AiWritingPanel document={DOCUMENT} selectedParagraph={DOCUMENT.paragraphs[2]} selectedParagraphId="p-2" />);
+    await flushPromises();
+
+    expect(screen.queryByText("Revision Suggestion")).not.toBeInTheDocument();
   });
 });

@@ -5,6 +5,7 @@ import { clearAnalyticsHighlights, setAnalyticsHighlights } from "./analyticsHig
 import { createEditorExtensions } from "./extensions";
 import { importedPdfToTipTapDocument } from "./importedDocument";
 import { findDocumentNodeTarget, selectDocumentNode, type NavigableNodeType } from "./navigation";
+import { replaceParagraphTextById } from "./revision";
 import { serializeDocument } from "./serializer";
 import { EditorToolbar } from "./EditorToolbar";
 import { WritingAnalyticsPanel } from "../panels/WritingAnalyticsPanel";
@@ -14,6 +15,7 @@ import type {
   AnalyticsHighlightRequest,
   BackendAnalyticsState,
 } from "../types/backendAnalytics";
+import type { SuggestRevisionResponse } from "../types/aiAnalysis";
 import type { DocumentModel, EditorSelection, ImportRequest, ParagraphBlock } from "../types/document";
 
 interface DocumentWorkspaceProps {
@@ -197,6 +199,22 @@ export function DocumentWorkspace({
     [editor],
   );
 
+  const acceptParagraphRevision = useCallback(
+    (suggestion: SuggestRevisionResponse) => {
+      if (!editor) {
+        return { applied: false as const, reason: "missing" as const };
+      }
+
+      return replaceParagraphTextById(
+        editor,
+        suggestion.paragraphId,
+        suggestion.sourceContentHash,
+        suggestion.suggestion.revisedText,
+      );
+    },
+    [editor],
+  );
+
   const selectedLabel = useMemo(
     () => selectedParagraph?.text || "Select a paragraph in the document to connect it with the panels.",
     [selectedParagraph],
@@ -261,7 +279,7 @@ export function DocumentWorkspace({
             document={document}
             selectedParagraph={selectedParagraph}
             selectedParagraphId={selection.paragraphId}
-            onNavigateToParagraph={(paragraphId) => navigateToDocumentNode(paragraphId, "paragraph")}
+            onAcceptRevision={acceptParagraphRevision}
           />
         )}
       </aside>
