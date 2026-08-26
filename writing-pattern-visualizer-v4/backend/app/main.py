@@ -8,6 +8,11 @@ from .document_analytics import (
     DocumentAnalyticsResponse,
     analyze_document,
 )
+from .document_ai_analysis import (
+    DocumentAIAnalysisService,
+    DocumentAnalysisRequest,
+    DocumentAnalysisResponse,
+)
 from .paragraph_ai_analysis import (
     ParagraphAIAnalysisError,
     ParagraphAIAnalysisService,
@@ -78,6 +83,18 @@ def analyze_paragraph(request: ParagraphAnalysisRequest) -> ParagraphAnalysisRes
     service = getattr(app.state, "paragraph_ai_analysis_service", None)
     if service is None:
         service = ParagraphAIAnalysisService()
+
+    try:
+        return service.analyze(request)
+    except ParagraphAIAnalysisError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.user_message) from exc
+
+
+@app.post("/api/ai/analyze-document", response_model=DocumentAnalysisResponse)
+def analyze_ai_document(request: DocumentAnalysisRequest) -> DocumentAnalysisResponse:
+    service = getattr(app.state, "document_ai_analysis_service", None)
+    if service is None:
+        service = DocumentAIAnalysisService()
 
     try:
         return service.analyze(request)

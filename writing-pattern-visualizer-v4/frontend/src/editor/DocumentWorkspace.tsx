@@ -261,6 +261,7 @@ export function DocumentWorkspace({
             document={document}
             selectedParagraph={selectedParagraph}
             selectedParagraphId={selection.paragraphId}
+            onNavigateToParagraph={(paragraphId) => navigateToDocumentNode(paragraphId, "paragraph")}
           />
         )}
       </aside>

@@ -404,7 +404,9 @@ button.analytics-bar-row:hover {
 button.analytics-bar-row:focus-visible,
 .analytics-count-row.interactive:focus-visible,
 .clear-highlights-button:focus-visible,
-.document-structure-item:focus-visible {
+.document-structure-item:focus-visible,
+.reanalyze-button:focus-visible,
+.ai-role-row.interactive:focus-visible {
   outline: 2px solid #8eb4c4;
   outline-offset: 2px;
 }
@@ -625,6 +627,17 @@ button.document-structure-item:hover,
   text-decoration: underline;
 }
 
+.ai-stale-note {
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid #eadfbd;
+  border-radius: 6px;
+  background: #fff9e8;
+  color: #695a32;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
 .ai-result-stack {
   display: grid;
   gap: 0.85rem;
@@ -672,6 +685,70 @@ button.document-structure-item:hover,
 
 .ai-chip {
   padding: 0.22rem 0.48rem;
+}
+
+.ai-role-list,
+.ai-move-distribution {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.ai-role-row {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  min-width: 0;
+  padding: 0.16rem 0.2rem;
+  border-radius: 5px;
+  color: #4e5966;
+  text-align: left;
+}
+
+.ai-role-row.interactive:hover {
+  background: #f1f6f8;
+}
+
+.ai-role-row span,
+.ai-role-row strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-role-row span {
+  color: #64717f;
+  font-weight: 700;
+}
+
+.ai-role-row strong {
+  color: #303640;
+}
+
+.ai-move-row {
+  display: grid;
+  grid-template-columns: minmax(76px, 1fr) minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.ai-move-row span,
+.ai-move-row strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #4e5966;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-move-row strong {
+  color: #303640;
+  text-align: right;
 }
 
 .ai-analysis-metadata {
