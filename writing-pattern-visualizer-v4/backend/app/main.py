@@ -8,16 +8,16 @@ from .document_analytics import (
     DocumentAnalyticsResponse,
     analyze_document,
 )
-from .document_ai_analysis import (
-    DocumentAIAnalysisService,
-    DocumentAnalysisRequest,
-    DocumentAnalysisResponse,
-)
 from .paragraph_ai_analysis import (
     ParagraphAIAnalysisError,
     ParagraphAIAnalysisService,
     ParagraphAnalysisRequest,
     ParagraphAnalysisResponse,
+)
+from .paragraph_revision import (
+    ParagraphRevisionRequest,
+    ParagraphRevisionResponse,
+    ParagraphRevisionService,
 )
 from .pdf_import import PdfImportError, PdfImportResponse, extract_pdf_content
 
@@ -54,7 +54,7 @@ def health() -> HealthResponse:
     return HealthResponse(
         status="ok",
         service="writing-pattern-visualizer-v4-backend",
-        phase="phase-5a",
+        phase="phase-6a",
         aiConfigured=settings.ai_configured,
         openaiModel=settings.openai_model,
     )
@@ -90,13 +90,13 @@ def analyze_paragraph(request: ParagraphAnalysisRequest) -> ParagraphAnalysisRes
         raise HTTPException(status_code=exc.status_code, detail=exc.user_message) from exc
 
 
-@app.post("/api/ai/analyze-document", response_model=DocumentAnalysisResponse)
-def analyze_ai_document(request: DocumentAnalysisRequest) -> DocumentAnalysisResponse:
-    service = getattr(app.state, "document_ai_analysis_service", None)
+@app.post("/api/ai/suggest-revision", response_model=ParagraphRevisionResponse)
+def suggest_revision(request: ParagraphRevisionRequest) -> ParagraphRevisionResponse:
+    service = getattr(app.state, "paragraph_revision_service", None)
     if service is None:
-        service = DocumentAIAnalysisService()
+        service = ParagraphRevisionService()
 
     try:
-        return service.analyze(request)
+        return service.suggest_revision(request)
     except ParagraphAIAnalysisError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.user_message) from exc

@@ -87,71 +87,48 @@ export interface ParagraphAIRequestIdentity {
   cacheKey: string;
 }
 
-export type DocumentAIBlock =
-  | {
-      type: "heading";
-      nodeId: string;
-      order: number;
-      text: string;
-      headingLevel: number;
-      blockType: "heading";
-    }
-  | {
-      type: "paragraph";
-      paragraphId: string;
-      order: number;
-      displayIndex: number;
-      text: string;
-      blockType: "paragraph";
-    };
+export type ParagraphRevisionAction = "improve_clarity" | "improve_academic_tone" | "improve_transition";
 
-export interface AnalyzeDocumentRequest {
+export interface SuggestRevisionRequest {
   documentId: string;
   revision: number;
   requestId: string;
   language: AnalyticsLanguage;
-  blocks: DocumentAIBlock[];
+  action: ParagraphRevisionAction;
+  sourceContentHash: string;
+  paragraph: {
+    paragraphId: string;
+    text: string;
+  };
+  context: {
+    nearestHeading: string | null;
+    previousParagraph: string | null;
+    nextParagraph: string | null;
+  };
 }
 
-export interface DocumentParagraphRole {
+export interface ParagraphRevisionSuggestion {
+  revisedText: string;
+  summary: string;
+}
+
+export interface SuggestRevisionResponse {
+  documentId: string;
+  sourceRevision: number;
+  requestId: string;
   paragraphId: string;
-  role: ParagraphRoleLabel;
-  rationale?: string | null;
-}
-
-export interface RhetoricalMoveDistribution {
-  label: RhetoricalMoveLabel;
-  count: number;
-  paragraphIds: string[];
-}
-
-export interface DocumentAIAnalysis {
-  paragraphRoles: DocumentParagraphRole[];
-  rhetoricalMoves: RhetoricalMoveDistribution[];
-  coherence: {
-    level: CoherenceLevel;
-    rationale: string;
-  };
-  academicTone: {
-    level: AcademicToneLevel;
-    rationale: string;
-  };
-  observation: string;
-}
-
-export interface AnalyzeDocumentResponse {
-  documentId: string;
-  revision: number;
-  requestId: string;
+  sourceContentHash: string;
+  action: ParagraphRevisionAction;
   model: string;
-  analysisVersion: string;
-  analyzedParagraphCount: number;
-  analysis: DocumentAIAnalysis;
+  revisionVersion: string;
+  suggestion: ParagraphRevisionSuggestion;
 }
 
-export interface DocumentAIRequestIdentity {
+export interface ParagraphRevisionRequestIdentity {
   documentId: string;
-  revision: number;
   requestId: string;
-  cacheKey: string;
+  sourceRevision: number;
+  paragraphId: string;
+  sourceContentHash: string;
+  action: ParagraphRevisionAction;
 }

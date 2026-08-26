@@ -1,8 +1,8 @@
 import type {
-  AnalyzeDocumentRequest,
-  AnalyzeDocumentResponse,
   AnalyzeParagraphRequest,
   AnalyzeParagraphResponse,
+  SuggestRevisionRequest,
+  SuggestRevisionResponse,
 } from "../types/aiAnalysis";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
@@ -31,11 +31,11 @@ export async function analyzeParagraph(
   return response.json() as Promise<AnalyzeParagraphResponse>;
 }
 
-export async function analyzeDocument(
-  request: AnalyzeDocumentRequest,
+export async function suggestRevision(
+  request: SuggestRevisionRequest,
   signal?: AbortSignal,
-): Promise<AnalyzeDocumentResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/ai/analyze-document`, {
+): Promise<SuggestRevisionResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/ai/suggest-revision`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -48,7 +48,7 @@ export async function analyzeDocument(
     throw new Error(await errorMessage(response));
   }
 
-  return response.json() as Promise<AnalyzeDocumentResponse>;
+  return response.json() as Promise<SuggestRevisionResponse>;
 }
 
 async function errorMessage(response: Response): Promise<string> {

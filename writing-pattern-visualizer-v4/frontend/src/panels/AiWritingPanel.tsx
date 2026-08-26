@@ -1,82 +1,82 @@
 import type { ReactNode } from "react";
-import { useState } from "react";
-import { useDocumentAIAnalysis } from "../ai/useDocumentAIAnalysis";
+import { useEffect, useMemo, useState } from "react";
+import { createWordDiff } from "../ai/revisionDiff";
 import { useParagraphAIAnalysis } from "../ai/useParagraphAIAnalysis";
+import { useParagraphRevisionSuggestion } from "../ai/useParagraphRevisionSuggestion";
 import type {
   AcademicToneLevel,
-  AnalyzeDocumentResponse,
   CoherenceLevel,
+  ParagraphRevisionAction,
   ParagraphRoleLabel,
   RhetoricalMoveLabel,
+  SuggestRevisionResponse,
 } from "../types/aiAnalysis";
 import type { AnalyticsLanguage } from "../types/backendAnalytics";
 import type { DocumentModel, ParagraphBlock } from "../types/document";
+import type { ParagraphRevisionApplyResult } from "../editor/revision";
 
 interface AiWritingPanelProps {
   document: DocumentModel;
   selectedParagraph?: ParagraphBlock;
   selectedParagraphId: string | null;
   language?: AnalyticsLanguage;
-  onNavigateToParagraph?: (paragraphId: string) => void;
+  onAcceptRevision?: (suggestion: SuggestRevisionResponse) => ParagraphRevisionApplyResult;
 }
+
+const REVISION_ACTIONS: Array<{ action: ParagraphRevisionAction; label: string }> = [
+  { action: "improve_clarity", label: "Improve clarity" },
+  { action: "improve_academic_tone", label: "Improve academic tone" },
+  { action: "improve_transition", label: "Improve transition" },
+];
 
 export function AiWritingPanel({
   document,
   selectedParagraph,
   selectedParagraphId,
   language = "English",
-  onNavigateToParagraph,
+  onAcceptRevision,
 }: AiWritingPanelProps) {
-  const [activeTab, setActiveTab] = useState<"document" | "paragraph">("paragraph");
-  const paragraphAnalysisState = useParagraphAIAnalysis(
-    document,
-    selectedParagraph,
-    selectedParagraphId,
-    language,
-    undefined,
-    activeTab === "paragraph",
-  );
-  const documentAnalysisState = useDocumentAIAnalysis(document, language);
+  const paragraphAnalysisState = useParagraphAIAnalysis(document, selectedParagraph, selectedParagraphId, language);
+  const revisionState = useParagraphRevisionSuggestion(document, selectedParagraph, selectedParagraphId, language);
+  const [acceptMessage, setAcceptMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    setAcceptMessage(null);
+  }, [selectedParagraphId, selectedParagraph?.text]);
+
+  const handleAcceptRevision = (suggestion: SuggestRevisionResponse) => {
+    if (!onAcceptRevision) {
+      setAcceptMessage("The revision cannot be applied in the current editor state.");
+      return;
+    }
+
+    const result = onAcceptRevision(suggestion);
+    if (result.applied) {
+      revisionState.clear();
+      setAcceptMessage(null);
+      return;
+    }
+
+    revisionState.clear();
+    setAcceptMessage(messageForApplyResult(result));
+  };
 
   return (
     <div className="panel-content">
       <p className="panel-kicker">AI assisted</p>
       <h2>AI Writing Analysis</h2>
       <p className="panel-description">
-        Paragraph analysis is generated from the selected paragraph and limited local context. It does not edit,
-        rewrite, or grade the document.
+        Analysis and revision suggestions are generated for the selected paragraph and limited local context. AI does
+        not edit, rewrite, or grade the document unless you explicitly accept a suggestion.
       </p>
 
-      <div className="ai-tab-row" role="tablist" aria-label="AI analysis scope">
-        <button
-          className={activeTab === "document" ? "ai-tab active" : "ai-tab"}
-          type="button"
-          role="tab"
-          aria-selected={activeTab === "document"}
-          onClick={() => setActiveTab("document")}
-        >
-          Document
-        </button>
-        <button
-          className={activeTab === "paragraph" ? "ai-tab active" : "ai-tab"}
-          type="button"
-          role="tab"
-          aria-selected={activeTab === "paragraph"}
-          onClick={() => setActiveTab("paragraph")}
-        >
-          Paragraph
-        </button>
-      </div>
-
-      {activeTab === "document" ? (
-        <DocumentAIAnalysisPanel
-          state={documentAnalysisState}
-          document={document}
-          onNavigateToParagraph={onNavigateToParagraph}
-        />
-      ) : (
-        <ParagraphAIAnalysisPanel analysisState={paragraphAnalysisState} />
-      )}
+      <ParagraphAIAnalysisPanel
+        analysisState={paragraphAnalysisState}
+        revisionState={revisionState}
+        selectedParagraph={selectedParagraph}
+        acceptMessage={acceptMessage}
+        onAcceptRevision={handleAcceptRevision}
+      />
 
       <dl className="panel-facts debug-facts">
         <div>
@@ -88,185 +88,97 @@ export function AiWritingPanel({
   );
 }
 
-function ParagraphAIAnalysisPanel({ analysisState }: { analysisState: ReturnType<typeof useParagraphAIAnalysis> }) {
+function ParagraphAIAnalysisPanel({
+  analysisState,
+  revisionState,
+  selectedParagraph,
+  acceptMessage,
+  onAcceptRevision,
+}: {
+  analysisState: ReturnType<typeof useParagraphAIAnalysis>;
+  revisionState: ReturnType<typeof useParagraphRevisionSuggestion>;
+  selectedParagraph?: ParagraphBlock;
+  acceptMessage: string | null;
+  onAcceptRevision: (suggestion: SuggestRevisionResponse) => void;
+}) {
+  const canShowActions = analysisState.status === "success" && Boolean(analysisState.data);
+
   return (
     <section className="ai-analysis-panel" aria-label="Paragraph AI analysis">
-        <div className="ai-analysis-heading-row">
-          <h3>{analysisState.displayLabel ? `Paragraph ${analysisState.displayLabel}` : "Paragraph"}</h3>
-          {analysisState.status === "success" && (
-            <button className="reanalyze-button" type="button" onClick={analysisState.reanalyze}>
-              Re-analyze
-            </button>
-          )}
-        </div>
-
-        {analysisState.status === "idle" || analysisState.status === "insufficient" ? (
-          <p className="analytics-empty">{analysisState.message}</p>
-        ) : null}
-
-        {analysisState.status === "loading" && <p className="analytics-empty">Analyzing paragraph...</p>}
-
-        {analysisState.status === "error" && (
-          <p className="analytics-empty">{analysisState.message || "AI analysis is temporarily unavailable."}</p>
-        )}
-
-        {analysisState.status === "success" && analysisState.data && (
-          <div className="ai-result-stack">
-            <AiResultSection title="Paragraph Role">
-              <QualitativeLabel label={formatRoleLabel(analysisState.data.analysis.paragraphRole.label)} />
-              <p>{analysisState.data.analysis.paragraphRole.rationale}</p>
-            </AiResultSection>
-
-            <AiResultSection title="Rhetorical Moves">
-              {analysisState.data.analysis.rhetoricalMoves.length === 0 ? (
-                <p>No distinct rhetorical moves identified.</p>
-              ) : (
-                <div className="ai-chip-list">
-                  {analysisState.data.analysis.rhetoricalMoves.map((move) => (
-                    <span key={`${move.label}-${move.rationale}`} className="ai-chip" title={move.rationale}>
-                      {formatMoveLabel(move.label)}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </AiResultSection>
-
-            <AiResultSection title="Coherence">
-              <QualitativeLabel label={formatAssessmentLabel(analysisState.data.analysis.coherence.level)} />
-              <p>{analysisState.data.analysis.coherence.rationale}</p>
-            </AiResultSection>
-
-            <AiResultSection title="Academic Tone">
-              <QualitativeLabel label={formatAssessmentLabel(analysisState.data.analysis.academicTone.level)} />
-              <p>{analysisState.data.analysis.academicTone.rationale}</p>
-            </AiResultSection>
-
-            <AiResultSection title="Observation">
-              <p>{analysisState.data.analysis.observation}</p>
-            </AiResultSection>
-
-            <dl className="ai-analysis-metadata">
-              <div>
-                <dt>Model</dt>
-                <dd>{analysisState.data.model}</dd>
-              </div>
-              <div>
-                <dt>Analysis</dt>
-                <dd>{analysisState.data.analysisVersion}</dd>
-              </div>
-              <div>
-                <dt>Source</dt>
-                <dd>{analysisState.fromCache ? "Cached" : "Fresh"}</dd>
-              </div>
-            </dl>
-          </div>
-        )}
-      </section>
-  );
-}
-
-function DocumentAIAnalysisPanel({
-  state,
-  document,
-  onNavigateToParagraph,
-}: {
-  state: ReturnType<typeof useDocumentAIAnalysis>;
-  document: DocumentModel;
-  onNavigateToParagraph?: (paragraphId: string) => void;
-}) {
-  const [rolesExpanded, setRolesExpanded] = useState(false);
-  const data = state.data;
-  const buttonLabel = data ? (state.isStale ? "Update analysis" : "Re-analyze") : "Analyze document";
-  const onPrimaryAction = data && !state.isStale ? state.reanalyze : state.analyze;
-
-  return (
-    <section className="ai-analysis-panel" aria-label="Document AI analysis">
       <div className="ai-analysis-heading-row">
-        <h3>Document Analysis</h3>
-        <button className="reanalyze-button" type="button" onClick={onPrimaryAction} disabled={!state.canAnalyze}>
-          {state.status === "loading" ? "Analyzing..." : buttonLabel}
-        </button>
+        <h3>{analysisState.displayLabel ? `Paragraph ${analysisState.displayLabel}` : "Paragraph"}</h3>
+        {analysisState.status === "success" && (
+          <button className="reanalyze-button" type="button" onClick={analysisState.reanalyze}>
+            Re-analyze
+          </button>
+        )}
       </div>
 
-      {!data && state.status !== "loading" && state.status !== "error" ? (
-        <p className="analytics-empty">{state.message}</p>
+      {analysisState.status === "idle" || analysisState.status === "insufficient" ? (
+        <p className="analytics-empty">{analysisState.message}</p>
       ) : null}
 
-      {state.status === "loading" && <p className="analytics-empty">Analyzing document...</p>}
+      {analysisState.status === "loading" && <p className="analytics-empty">Analyzing paragraph...</p>}
 
-      {state.status === "error" && (
-        <p className="analytics-empty">{state.message || "AI analysis is temporarily unavailable."}</p>
+      {analysisState.status === "error" && (
+        <p className="analytics-empty">{analysisState.message || "AI analysis is temporarily unavailable."}</p>
       )}
 
-      {data && (
+      {analysisState.status === "success" && analysisState.data && (
         <div className="ai-result-stack">
-          <p className={state.isStale ? "ai-stale-note" : "analytics-note"}>
-            {state.isStale
-              ? "Document changed since this analysis."
-              : `Analysis based on Revision ${data.revision}`}
-          </p>
-
-          <DocumentRolesSection
-            data={data}
-            document={document}
-            expanded={rolesExpanded}
-            onToggleExpanded={() => setRolesExpanded((value) => !value)}
-            onNavigateToParagraph={onNavigateToParagraph}
-          />
+          <AiResultSection title="Paragraph Role">
+            <QualitativeLabel label={formatRoleLabel(analysisState.data.analysis.paragraphRole.label)} />
+            <p>{analysisState.data.analysis.paragraphRole.rationale}</p>
+          </AiResultSection>
 
           <AiResultSection title="Rhetorical Moves">
-            {data.analysis.rhetoricalMoves.length === 0 ? (
-              <p>No rhetorical moves identified across the analyzed paragraphs.</p>
+            {analysisState.data.analysis.rhetoricalMoves.length === 0 ? (
+              <p>No distinct rhetorical moves identified.</p>
             ) : (
-              <div className="ai-move-distribution">
-                {data.analysis.rhetoricalMoves.map((move) => (
-                  <div className="ai-move-row" key={move.label}>
-                    <span>{formatMoveLabel(move.label)}</span>
-                    <div className="analytics-bar-track" aria-hidden="true">
-                      <span
-                        className="analytics-bar-fill transition-fill"
-                        style={{
-                          width: `${Math.max(8, (move.count / maxMoveCount(data)) * 100)}%`,
-                        }}
-                      />
-                    </div>
-                    <strong>{move.count}</strong>
-                  </div>
+              <div className="ai-chip-list">
+                {analysisState.data.analysis.rhetoricalMoves.map((move) => (
+                  <span key={`${move.label}-${move.rationale}`} className="ai-chip" title={move.rationale}>
+                    {formatMoveLabel(move.label)}
+                  </span>
                 ))}
               </div>
             )}
           </AiResultSection>
 
           <AiResultSection title="Coherence">
-            <QualitativeLabel label={formatAssessmentLabel(data.analysis.coherence.level)} />
-            <p>{data.analysis.coherence.rationale}</p>
+            <QualitativeLabel label={formatAssessmentLabel(analysisState.data.analysis.coherence.level)} />
+            <p>{analysisState.data.analysis.coherence.rationale}</p>
           </AiResultSection>
 
           <AiResultSection title="Academic Tone">
-            <QualitativeLabel label={formatAssessmentLabel(data.analysis.academicTone.level)} />
-            <p>{data.analysis.academicTone.rationale}</p>
+            <QualitativeLabel label={formatAssessmentLabel(analysisState.data.analysis.academicTone.level)} />
+            <p>{analysisState.data.analysis.academicTone.rationale}</p>
           </AiResultSection>
 
           <AiResultSection title="Observation">
-            <p>{data.analysis.observation}</p>
+            <p>{analysisState.data.analysis.observation}</p>
           </AiResultSection>
+
+          <RevisionActionsSection
+            canShowActions={canShowActions}
+            revisionState={revisionState}
+            selectedParagraph={selectedParagraph}
+            acceptMessage={acceptMessage}
+            onAcceptRevision={onAcceptRevision}
+          />
 
           <dl className="ai-analysis-metadata">
             <div>
               <dt>Model</dt>
-              <dd>{data.model}</dd>
+              <dd>{analysisState.data.model}</dd>
             </div>
             <div>
               <dt>Analysis</dt>
-              <dd>{data.analysisVersion}</dd>
-            </div>
-            <div>
-              <dt>Paragraphs</dt>
-              <dd>{data.analyzedParagraphCount}</dd>
+              <dd>{analysisState.data.analysisVersion}</dd>
             </div>
             <div>
               <dt>Source</dt>
-              <dd>{state.fromCache ? "Cached" : "Fresh"}</dd>
+              <dd>{analysisState.fromCache ? "Cached" : "Fresh"}</dd>
             </div>
           </dl>
         </div>
@@ -275,57 +187,101 @@ function DocumentAIAnalysisPanel({
   );
 }
 
-function DocumentRolesSection({
-  data,
-  document,
-  expanded,
-  onToggleExpanded,
-  onNavigateToParagraph,
+function RevisionActionsSection({
+  canShowActions,
+  revisionState,
+  selectedParagraph,
+  acceptMessage,
+  onAcceptRevision,
 }: {
-  data: AnalyzeDocumentResponse;
-  document: DocumentModel;
-  expanded: boolean;
-  onToggleExpanded: () => void;
-  onNavigateToParagraph?: (paragraphId: string) => void;
+  canShowActions: boolean;
+  revisionState: ReturnType<typeof useParagraphRevisionSuggestion>;
+  selectedParagraph?: ParagraphBlock;
+  acceptMessage: string | null;
+  onAcceptRevision: (suggestion: SuggestRevisionResponse) => void;
 }) {
-  const roles = data.analysis.paragraphRoles.map((role) => ({
-    ...role,
-    displayLabel: displayLabelForParagraph(document, role.paragraphId) ?? "P?",
-  }));
-  const visibleRoles = expanded ? roles : roles.slice(0, 5);
+  if (!canShowActions) {
+    return null;
+  }
+
+  const suggestion = revisionState.suggestion;
 
   return (
-    <AiResultSection title="Paragraph Roles">
-      <div className="ai-role-list">
-        {visibleRoles.map((role) => {
-          const content = (
-            <>
-              <span>{role.displayLabel}</span>
-              <strong>{formatRoleLabel(role.role)}</strong>
-            </>
-          );
-          return onNavigateToParagraph ? (
-            <button
-              key={role.paragraphId}
-              className="ai-role-row interactive"
-              type="button"
-              onClick={() => onNavigateToParagraph(role.paragraphId)}
-            >
-              {content}
-            </button>
-          ) : (
-            <div key={role.paragraphId} className="ai-role-row">
-              {content}
-            </div>
-          );
-        })}
-      </div>
-      {roles.length > 5 && (
-        <button className="paragraph-overview-toggle" type="button" onClick={onToggleExpanded}>
-          {expanded ? "▾" : "▸"} {expanded ? "Show fewer paragraphs" : `Show all paragraphs (${roles.length})`}
-        </button>
+    <AiResultSection title={revisionState.suggestion ? "Revision Suggestion" : "Suggested Actions"}>
+      {revisionState.status === "success" && suggestion && selectedParagraph ? (
+        <RevisionSuggestionCard
+          originalText={selectedParagraph.text}
+          suggestion={suggestion}
+          onReject={revisionState.reject}
+          onAccept={() => onAcceptRevision(suggestion)}
+        />
+      ) : (
+        <div className="revision-action-stack">
+          <div className="revision-action-grid">
+            {REVISION_ACTIONS.map((item) => (
+              <button
+                key={item.action}
+                className="revision-action-button"
+                type="button"
+                onClick={() => revisionState.requestRevision(item.action)}
+                disabled={!revisionState.canRequest}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+
+          {revisionState.status === "loading" && <p className="analytics-empty">Generating revision...</p>}
+          {revisionState.status === "error" && (
+            <p className="analytics-empty">{revisionState.message || "A revision could not be generated. Please try again."}</p>
+          )}
+          {acceptMessage && <p className="analytics-empty">{acceptMessage}</p>}
+        </div>
       )}
     </AiResultSection>
+  );
+}
+
+function RevisionSuggestionCard({
+  originalText,
+  suggestion,
+  onReject,
+  onAccept,
+}: {
+  originalText: string;
+  suggestion: SuggestRevisionResponse;
+  onReject: () => void;
+  onAccept: () => void;
+}) {
+  return (
+    <div className="revision-suggestion-card">
+      <p className="revision-action-label">{formatRevisionActionLabel(suggestion.action)}</p>
+      <RevisionDiffPreview originalText={originalText} revisedText={suggestion.suggestion.revisedText} />
+      <p className="revision-summary">{suggestion.suggestion.summary}</p>
+      <div className="revision-decision-row">
+        <button className="revision-decision-button secondary" type="button" onClick={onReject}>
+          Reject
+        </button>
+        <button className="revision-decision-button primary" type="button" onClick={onAccept}>
+          Accept
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function RevisionDiffPreview({ originalText, revisedText }: { originalText: string; revisedText: string }) {
+  const segments = useMemo(() => createWordDiff(originalText, revisedText), [originalText, revisedText]);
+
+  return (
+    <p className="revision-diff-preview" aria-label="Word-level preview of the proposed revision">
+      {segments.map((segment, index) => (
+        <span key={`${segment.kind}-${index}`} className={`revision-diff-segment ${segment.kind}`}>
+          {segment.text}
+          {index < segments.length - 1 ? " " : ""}
+        </span>
+      ))}
+    </p>
   );
 }
 
@@ -360,14 +316,16 @@ function formatAssessmentLabel(label: CoherenceLevel | AcademicToneLevel): strin
     .join(" ");
 }
 
-function displayLabelForParagraph(document: DocumentModel, paragraphId: string): string | null {
-  const proseParagraphs = [...document.paragraphs]
-    .sort((left, right) => left.order - right.order)
-    .filter((paragraph) => paragraph.type === "paragraph" && paragraph.blockType === "paragraph");
-  const index = proseParagraphs.findIndex((paragraph) => paragraph.id === paragraphId);
-  return index === -1 ? null : `P${index + 1}`;
+function formatRevisionActionLabel(action: ParagraphRevisionAction): string {
+  return REVISION_ACTIONS.find((item) => item.action === action)?.label ?? "Revision suggestion";
 }
 
-function maxMoveCount(data: AnalyzeDocumentResponse): number {
-  return Math.max(1, ...data.analysis.rhetoricalMoves.map((move) => move.count));
+function messageForApplyResult(result: Exclude<ParagraphRevisionApplyResult, { applied: true }>): string {
+  if (result.reason === "stale") {
+    return "This paragraph changed after the suggestion was generated. Generate a new revision before applying it.";
+  }
+  if (result.reason === "missing") {
+    return "The target paragraph is no longer available. No changes were made.";
+  }
+  return "The revision could not be applied safely. No changes were made.";
 }

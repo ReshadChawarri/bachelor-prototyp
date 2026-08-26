@@ -52,7 +52,6 @@ export function useParagraphAIAnalysis(
   selectedParagraphId: string | null,
   language: AnalyticsLanguage = "English",
   debounceMs = AI_ANALYSIS_DEBOUNCE_MS,
-  enabled = true,
 ): ParagraphAIAnalysisState {
   const [state, setState] = useState<Omit<ParagraphAIAnalysisState, "reanalyze">>(EMPTY_STATE);
   const [reanalyzeNonce, setReanalyzeNonce] = useState(0);
@@ -73,12 +72,6 @@ export function useParagraphAIAnalysis(
   }, [target]);
 
   useEffect(() => {
-    if (!enabled) {
-      latestRequest.current = null;
-      setState(EMPTY_STATE);
-      return;
-    }
-
     if (target.status !== "ready") {
       latestRequest.current = null;
       setState({
@@ -167,7 +160,7 @@ export function useParagraphAIAnalysis(
       window.clearTimeout(timerId);
       controller.abort();
     };
-  }, [document.documentId, document.revision, debounceMs, enabled, reanalyzeNonce, target]);
+  }, [document.documentId, document.revision, debounceMs, reanalyzeNonce, target]);
 
   return {
     ...state,
