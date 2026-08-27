@@ -414,6 +414,51 @@ button:disabled {
   outline-offset: 2px;
 }
 
+.sentence-profile-row,
+.sentence-profile-item {
+  display: grid;
+  grid-template-columns: minmax(74px, 1fr) minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.sentence-profile-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin-bottom: 0.55rem;
+}
+
+.sentence-profile-row span,
+.sentence-profile-item span {
+  color: #64717f;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.sentence-profile-row strong,
+.sentence-profile-item strong {
+  color: #202124;
+  font-size: 0.82rem;
+  text-align: right;
+}
+
+.sentence-profile-list {
+  display: grid;
+  gap: 0.4rem;
+  margin-bottom: 0.65rem;
+}
+
+.analytics-compact-summary {
+  margin: 0 0 0.25rem;
+  color: #4e5966;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.sentence-distribution-list {
+  margin-top: 0.4rem;
+}
+
 .paragraph-length-revision-preview {
   display: grid;
   gap: 0.45rem;

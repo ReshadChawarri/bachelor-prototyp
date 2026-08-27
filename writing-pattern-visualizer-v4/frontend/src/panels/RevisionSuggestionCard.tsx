@@ -7,6 +7,7 @@ export const REVISION_ACTION_LABELS: Record<ParagraphRevisionAction, string> = {
   improve_academic_tone: "Improve academic tone",
   improve_transition: "Improve transition",
   adjust_paragraph_length: "Adjust paragraph length",
+  improve_sentence_length: "Improve sentence length",
 };
 
 export function RevisionSuggestionCard({
@@ -42,6 +43,30 @@ export function RevisionSuggestionCard({
           </div>
         </dl>
       )}
+      {suggestion.sentence && (
+        <dl className="revision-length-facts" aria-label="Sentence revision metrics">
+          <div>
+            <dt>Avg. sentence length</dt>
+            <dd>
+              {suggestion.sentence.originalAverageSentenceLength.toFixed(1)} →{" "}
+              {suggestion.sentence.revisedAverageSentenceLength.toFixed(1)} words
+            </dd>
+          </div>
+          <div>
+            <dt>Very long sentences</dt>
+            <dd>
+              {sentenceCategoryCount(suggestion.sentence.originalDistribution, "Very long")} →{" "}
+              {sentenceCategoryCount(suggestion.sentence.revisedDistribution, "Very long")}
+            </dd>
+          </div>
+          <div>
+            <dt>Sentences</dt>
+            <dd>
+              {suggestion.sentence.originalSentenceCount} → {suggestion.sentence.revisedSentenceCount}
+            </dd>
+          </div>
+        </dl>
+      )}
       <RevisionDiffPreview originalText={originalText} revisedText={suggestion.suggestion.revisedText} />
       <p className="revision-summary">{suggestion.suggestion.summary}</p>
       <div className="revision-decision-row">
@@ -54,6 +79,10 @@ export function RevisionSuggestionCard({
       </div>
     </div>
   );
+}
+
+function sentenceCategoryCount(distribution: Array<{ category: string; count: number }>, category: string): number {
+  return distribution.find((bucket) => bucket.category === category)?.count ?? 0;
 }
 
 export function formatRevisionActionLabel(action: ParagraphRevisionAction): string {

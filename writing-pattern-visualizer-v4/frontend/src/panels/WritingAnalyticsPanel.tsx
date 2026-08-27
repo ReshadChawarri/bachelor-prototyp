@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { calculateLocalWritingAnalytics } from "../analytics/localAnalytics";
-import type { ParagraphLengthMetric } from "../analytics/localAnalytics";
+import { buildSentenceDistribution, calculateLocalWritingAnalytics } from "../analytics/localAnalytics";
+import type { ParagraphLengthMetric, SentenceDistributionMetric, SentenceLengthMetric } from "../analytics/localAnalytics";
 import {
   isMeaningfulParagraphLengthTarget,
   PARAGRAPH_LENGTH_TARGET_POLICY,
   paragraphLengthTargetRange,
 } from "../analytics/paragraphLengthTarget";
 import { useParagraphRevisionSuggestion } from "../ai/useParagraphRevisionSuggestion";
+import type { ParagraphRevisionState } from "../ai/useParagraphRevisionSuggestion";
 import { RevisionSuggestionCard } from "./RevisionSuggestionCard";
 import type {
   ActiveAnalyticsHighlight,
@@ -31,6 +32,7 @@ interface WritingAnalyticsPanelProps {
   selectedParagraphId: string | null;
   language?: AnalyticsLanguage;
   activeAnalyticsHighlight?: ActiveAnalyticsHighlight | null;
+  sentenceRevisionState?: ParagraphRevisionState;
   onAcceptRevision?: (suggestion: SuggestRevisionResponse) => ParagraphRevisionApplyResult;
   onNavigateToParagraph?: (paragraphId: string) => void;
   onNavigateToHeading?: (headingId: string) => void;
@@ -46,6 +48,7 @@ export function WritingAnalyticsPanel({
   selectedParagraphId,
   language = "English",
   activeAnalyticsHighlight,
+  sentenceRevisionState: externalSentenceRevisionState,
   onAcceptRevision,
   onNavigateToParagraph,
   onNavigateToHeading,
@@ -53,6 +56,10 @@ export function WritingAnalyticsPanel({
   onClearAnalyticsHighlights,
 }: WritingAnalyticsPanelProps) {
   const [allParagraphsOpen, setAllParagraphsOpen] = useState(false);
+  const [sentenceDistributionOpen, setSentenceDistributionOpen] = useState(false);
+  const [transitionCategoriesOpen, setTransitionCategoriesOpen] = useState(false);
+  const [repetitionTermsOpen, setRepetitionTermsOpen] = useState(false);
+  const [documentStructureOpen, setDocumentStructureOpen] = useState(false);
   const [lengthAcceptMessage, setLengthAcceptMessage] = useState<string | null>(null);
   const analytics = useMemo(() => calculateLocalWritingAnalytics(document), [document]);
   const paragraphLengthRevisionState = useParagraphRevisionSuggestion(
@@ -61,6 +68,8 @@ export function WritingAnalyticsPanel({
     selectedParagraphId,
     language,
   );
+  const localSentenceRevisionState = useParagraphRevisionSuggestion(document, selectedParagraph, selectedParagraphId, language);
+  const sentenceRevisionState = externalSentenceRevisionState ?? localSentenceRevisionState;
   const maxParagraphWords = Math.max(1, ...analytics.paragraphLengths.map((paragraph) => paragraph.wordCount));
   const maxSentenceBucketCount = Math.max(1, ...analytics.sentenceDistribution.map((bucket) => bucket.count));
   const paragraphRows = useMemo(
@@ -72,6 +81,10 @@ export function WritingAnalyticsPanel({
     [analytics.paragraphLengths, selectedParagraphId],
   );
   const selectedParagraphLength = paragraphRows.find((paragraph) => paragraph.isSelected);
+  const selectedSentenceProfile = useMemo(
+    () => buildSelectedSentenceProfile(selectedParagraphLength, analytics.sentenceLengths),
+    [analytics.sentenceLengths, selectedParagraphLength],
+  );
   const currentBackendAnalytics =
     backendAnalytics.data?.revision === document.revision ? backendAnalytics.data : null;
 
@@ -174,23 +187,20 @@ export function WritingAnalyticsPanel({
 
       <section className="analytics-section" aria-label="Sentence length distribution">
         <h3>Sentence Length</h3>
-        <div className="analytics-bar-list">
-          {analytics.sentenceDistribution.map((bucket) => (
-            <div key={bucket.category} className="analytics-distribution-row">
-              <div className="analytics-distribution-label">
-                <span>{bucket.category}</span>
-                <small>{bucket.rangeLabel}</small>
-              </div>
-              <div className="analytics-bar-track" aria-hidden="true">
-                <span
-                  className="analytics-bar-fill sentence-fill"
-                  style={{ width: `${bucket.count === 0 ? 0 : Math.max(6, (bucket.count / maxSentenceBucketCount) * 100)}%` }}
-                />
-              </div>
-              <span className="analytics-bar-value">{bucket.count}</span>
-            </div>
-          ))}
-        </div>
+        <SelectedSentenceLengthView profile={selectedSentenceProfile} revisionState={sentenceRevisionState} />
+
+        <DisclosureToggle
+          expanded={sentenceDistributionOpen}
+          label="Document distribution"
+          onToggle={() => setSentenceDistributionOpen((open) => !open)}
+        />
+
+        {sentenceDistributionOpen && (
+          <SentenceDistributionList
+            distribution={analytics.sentenceDistribution}
+            maxSentenceBucketCount={maxSentenceBucketCount}
+          />
+        )}
       </section>
 
       <TransitionWordsSection
@@ -198,6 +208,8 @@ export function WritingAnalyticsPanel({
         loading={backendAnalytics.loading}
         error={backendAnalytics.error}
         activeHighlight={activeAnalyticsHighlight}
+        expanded={transitionCategoriesOpen}
+        onToggleExpanded={() => setTransitionCategoriesOpen((open) => !open)}
         onToggleAnalyticsHighlight={onToggleAnalyticsHighlight}
       />
 
@@ -206,6 +218,8 @@ export function WritingAnalyticsPanel({
         loading={backendAnalytics.loading}
         error={backendAnalytics.error}
         activeHighlight={activeAnalyticsHighlight}
+        expanded={repetitionTermsOpen}
+        onToggleExpanded={() => setRepetitionTermsOpen((open) => !open)}
         onToggleAnalyticsHighlight={onToggleAnalyticsHighlight}
       />
 
@@ -214,6 +228,8 @@ export function WritingAnalyticsPanel({
         loading={backendAnalytics.loading}
         error={backendAnalytics.error}
         selectedNodeId={selectedParagraphId}
+        expanded={documentStructureOpen}
+        onToggleExpanded={() => setDocumentStructureOpen((open) => !open)}
         onNavigateToHeading={onNavigateToHeading}
       />
 
@@ -253,12 +269,16 @@ function TransitionWordsSection({
   loading,
   error,
   activeHighlight,
+  expanded,
+  onToggleExpanded,
   onToggleAnalyticsHighlight,
 }: {
   analytics: DocumentAnalyticsResponse | null;
   loading: boolean;
   error: string | null;
   activeHighlight?: ActiveAnalyticsHighlight | null;
+  expanded: boolean;
+  onToggleExpanded: () => void;
   onToggleAnalyticsHighlight?: (request: AnalyticsHighlightRequest) => void;
 }) {
   return (
@@ -270,6 +290,8 @@ function TransitionWordsSection({
             transitions={current.transitions}
             revision={current.revision}
             activeHighlight={activeHighlight}
+            expanded={expanded}
+            onToggleExpanded={onToggleExpanded}
             onToggleAnalyticsHighlight={onToggleAnalyticsHighlight}
           />
         )}
@@ -282,11 +304,15 @@ function TransitionWordsContent({
   transitions,
   revision,
   activeHighlight,
+  expanded,
+  onToggleExpanded,
   onToggleAnalyticsHighlight,
 }: {
   transitions: TransitionAnalytics;
   revision: number;
   activeHighlight?: ActiveAnalyticsHighlight | null;
+  expanded: boolean;
+  onToggleExpanded: () => void;
   onToggleAnalyticsHighlight?: (request: AnalyticsHighlightRequest) => void;
 }) {
   const maxCategoryCount = Math.max(1, ...transitions.categories.map((category) => category.count));
@@ -301,39 +327,41 @@ function TransitionWordsContent({
         <span>Total</span>
         <strong>{transitions.total}</strong>
       </div>
-      {transitions.categories.map((category) => (
-        <CountBarRow
-          key={category.name}
-          label={category.name}
-          count={category.count}
-          maxCount={maxCategoryCount}
-          fillClassName="transition-fill"
-          isActive={
-            activeHighlight?.type === "transition" &&
-            activeHighlight.key === category.name &&
-            activeHighlight.revision === revision
-          }
-          ariaLabel={`Highlight ${category.count} ${category.name} transition occurrence${
-            category.count === 1 ? "" : "s"
-          }`}
-          onActivate={
-            onToggleAnalyticsHighlight
-              ? () =>
-                  onToggleAnalyticsHighlight({
-                    type: "transition",
-                    key: category.name,
-                    label: category.name,
-                    revision,
-                    occurrences: category.occurrences.map(({ paragraphId, startOffset, endOffset }) => ({
-                      paragraphId,
-                      startOffset,
-                      endOffset,
-                    })),
-                  })
-              : undefined
-          }
-        />
-      ))}
+      <DisclosureToggle expanded={expanded} label="Show categories" onToggle={onToggleExpanded} />
+      {expanded &&
+        transitions.categories.map((category) => (
+          <CountBarRow
+            key={category.name}
+            label={category.name}
+            count={category.count}
+            maxCount={maxCategoryCount}
+            fillClassName="transition-fill"
+            isActive={
+              activeHighlight?.type === "transition" &&
+              activeHighlight.key === category.name &&
+              activeHighlight.revision === revision
+            }
+            ariaLabel={`Highlight ${category.count} ${category.name} transition occurrence${
+              category.count === 1 ? "" : "s"
+            }`}
+            onActivate={
+              onToggleAnalyticsHighlight
+                ? () =>
+                    onToggleAnalyticsHighlight({
+                      type: "transition",
+                      key: category.name,
+                      label: category.name,
+                      revision,
+                      occurrences: category.occurrences.map(({ paragraphId, startOffset, endOffset }) => ({
+                        paragraphId,
+                        startOffset,
+                        endOffset,
+                      })),
+                    })
+                : undefined
+            }
+          />
+        ))}
     </div>
   );
 }
@@ -343,12 +371,16 @@ function RepetitionSection({
   loading,
   error,
   activeHighlight,
+  expanded,
+  onToggleExpanded,
   onToggleAnalyticsHighlight,
 }: {
   analytics: DocumentAnalyticsResponse | null;
   loading: boolean;
   error: string | null;
   activeHighlight?: ActiveAnalyticsHighlight | null;
+  expanded: boolean;
+  onToggleExpanded: () => void;
   onToggleAnalyticsHighlight?: (request: AnalyticsHighlightRequest) => void;
 }) {
   return (
@@ -360,6 +392,8 @@ function RepetitionSection({
             repetition={current.repetition}
             revision={current.revision}
             activeHighlight={activeHighlight}
+            expanded={expanded}
+            onToggleExpanded={onToggleExpanded}
             onToggleAnalyticsHighlight={onToggleAnalyticsHighlight}
           />
         )}
@@ -372,11 +406,15 @@ function RepetitionContent({
   repetition,
   revision,
   activeHighlight,
+  expanded,
+  onToggleExpanded,
   onToggleAnalyticsHighlight,
 }: {
   repetition: RepetitionAnalytics;
   revision: number;
   activeHighlight?: ActiveAnalyticsHighlight | null;
+  expanded: boolean;
+  onToggleExpanded: () => void;
   onToggleAnalyticsHighlight?: (request: AnalyticsHighlightRequest) => void;
 }) {
   const maxTermCount = Math.max(1, ...repetition.terms.map((term) => term.count));
@@ -387,37 +425,42 @@ function RepetitionContent({
 
   return (
     <div className="analytics-count-list">
-      {repetition.terms.map((term) => (
-        <CountBarRow
-          key={term.term}
-          label={term.term}
-          count={term.count}
-          maxCount={maxTermCount}
-          fillClassName="repetition-fill"
-          isActive={
-            activeHighlight?.type === "repetition" &&
-            activeHighlight.key === term.term &&
-            activeHighlight.revision === revision
-          }
-          ariaLabel={`Highlight ${term.count} occurrence${term.count === 1 ? "" : "s"} of ${term.term}`}
-          onActivate={
-            onToggleAnalyticsHighlight
-              ? () =>
-                  onToggleAnalyticsHighlight({
-                    type: "repetition",
-                    key: term.term,
-                    label: term.term,
-                    revision,
-                    occurrences: term.occurrences.map(({ paragraphId, startOffset, endOffset }) => ({
-                      paragraphId,
-                      startOffset,
-                      endOffset,
-                    })),
-                  })
-              : undefined
-          }
-        />
-      ))}
+      <p className="analytics-compact-summary">
+        {repetition.terms.length} repeated term{repetition.terms.length === 1 ? "" : "s"}
+      </p>
+      <DisclosureToggle expanded={expanded} label="Show repeated terms" onToggle={onToggleExpanded} />
+      {expanded &&
+        repetition.terms.map((term) => (
+          <CountBarRow
+            key={term.term}
+            label={term.term}
+            count={term.count}
+            maxCount={maxTermCount}
+            fillClassName="repetition-fill"
+            isActive={
+              activeHighlight?.type === "repetition" &&
+              activeHighlight.key === term.term &&
+              activeHighlight.revision === revision
+            }
+            ariaLabel={`Highlight ${term.count} occurrence${term.count === 1 ? "" : "s"} of ${term.term}`}
+            onActivate={
+              onToggleAnalyticsHighlight
+                ? () =>
+                    onToggleAnalyticsHighlight({
+                      type: "repetition",
+                      key: term.term,
+                      label: term.term,
+                      revision,
+                      occurrences: term.occurrences.map(({ paragraphId, startOffset, endOffset }) => ({
+                        paragraphId,
+                        startOffset,
+                        endOffset,
+                      })),
+                    })
+                : undefined
+            }
+          />
+        ))}
     </div>
   );
 }
@@ -427,12 +470,16 @@ function DocumentStructureSection({
   loading,
   error,
   selectedNodeId,
+  expanded,
+  onToggleExpanded,
   onNavigateToHeading,
 }: {
   analytics: DocumentAnalyticsResponse | null;
   loading: boolean;
   error: string | null;
   selectedNodeId: string | null;
+  expanded: boolean;
+  onToggleExpanded: () => void;
   onNavigateToHeading?: (headingId: string) => void;
 }) {
   return (
@@ -443,6 +490,8 @@ function DocumentStructureSection({
           <DocumentStructureContent
             structure={current.structure}
             selectedNodeId={selectedNodeId}
+            expanded={expanded}
+            onToggleExpanded={onToggleExpanded}
             onNavigateToHeading={onNavigateToHeading}
           />
         )}
@@ -454,10 +503,14 @@ function DocumentStructureSection({
 function DocumentStructureContent({
   structure,
   selectedNodeId,
+  expanded,
+  onToggleExpanded,
   onNavigateToHeading,
 }: {
   structure: DocumentStructureAnalytics;
   selectedNodeId: string | null;
+  expanded: boolean;
+  onToggleExpanded: () => void;
   onNavigateToHeading?: (headingId: string) => void;
 }) {
   if (structure.headings.length === 0) {
@@ -465,33 +518,41 @@ function DocumentStructureContent({
   }
 
   return (
-    <ol className="document-structure-list">
-      {structure.headings.map((heading, index) => {
-        const nodeId = structure.source === "explicit" ? (heading.nodeId ?? heading.paragraphId) : null;
-        const level = Math.min(Math.max(heading.level, 1), 3);
-        const isSelected = Boolean(nodeId && nodeId === selectedNodeId);
+    <>
+      <p className="analytics-compact-summary">
+        {structure.headings.length} heading{structure.headings.length === 1 ? "" : "s"}
+      </p>
+      <DisclosureToggle expanded={expanded} label="Show structure" onToggle={onToggleExpanded} />
+      {expanded && (
+        <ol className="document-structure-list">
+          {structure.headings.map((heading, index) => {
+            const nodeId = structure.source === "explicit" ? (heading.nodeId ?? heading.paragraphId) : null;
+            const level = Math.min(Math.max(heading.level, 1), 3);
+            const isSelected = Boolean(nodeId && nodeId === selectedNodeId);
 
-        return (
-          <li key={`${nodeId ?? heading.paragraphId ?? "heading"}-${index}`}>
-            {nodeId && onNavigateToHeading ? (
-              <button
-                className={isSelected ? `document-structure-item level-${level} selected` : `document-structure-item level-${level}`}
-                type="button"
-                data-node-id={nodeId}
-                aria-current={isSelected ? "true" : undefined}
-                onClick={() => onNavigateToHeading(nodeId)}
-              >
-                {heading.text}
-              </button>
-            ) : (
-              <span className={`document-structure-item level-${level}`} data-node-id={nodeId ?? undefined}>
-                {heading.text}
-              </span>
-            )}
-          </li>
-        );
-      })}
-    </ol>
+            return (
+              <li key={`${nodeId ?? heading.paragraphId ?? "heading"}-${index}`}>
+                {nodeId && onNavigateToHeading ? (
+                  <button
+                    className={isSelected ? `document-structure-item level-${level} selected` : `document-structure-item level-${level}`}
+                    type="button"
+                    data-node-id={nodeId}
+                    aria-current={isSelected ? "true" : undefined}
+                    onClick={() => onNavigateToHeading(nodeId)}
+                  >
+                    {heading.text}
+                  </button>
+                ) : (
+                  <span className={`document-structure-item level-${level}`} data-node-id={nodeId ?? undefined}>
+                    {heading.text}
+                  </span>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </>
   );
 }
 
@@ -513,6 +574,123 @@ function BackendSectionState({
     return <p className="analytics-empty">Updating...</p>;
   }
   return <>{children(analytics)}</>;
+}
+
+interface SelectedSentenceProfile {
+  paragraphId: string;
+  label: string;
+  sentenceCount: number;
+  averageSentenceLength: number;
+  distribution: SentenceDistributionMetric[];
+}
+
+function SelectedSentenceLengthView({
+  profile,
+  revisionState,
+}: {
+  profile?: SelectedSentenceProfile;
+  revisionState: ParagraphRevisionState;
+}) {
+  if (!profile) {
+    return (
+      <div className="selected-paragraph-summary empty">
+        <p>Select a paragraph to inspect</p>
+        <p>its sentence structure.</p>
+      </div>
+    );
+  }
+
+  const maxSelectedSentenceCount = Math.max(1, ...profile.distribution.map((bucket) => bucket.count));
+  const isSentenceRevisionLoading =
+    revisionState.status === "loading" && revisionState.activeAction === "improve_sentence_length";
+  const isSentenceRevisionError =
+    revisionState.status === "error" && revisionState.activeAction === "improve_sentence_length";
+  const isSentenceRevisionReady =
+    revisionState.status === "success" && revisionState.suggestion?.action === "improve_sentence_length";
+
+  return (
+    <div className="selected-paragraph-summary" data-paragraph-id={profile.paragraphId}>
+      <p className="selected-paragraph-meta">Selected paragraph · {profile.label}</p>
+      <div className="sentence-profile-row">
+        <span>Avg. sentence</span>
+        <strong>{formatAverage(profile.averageSentenceLength)} words</strong>
+      </div>
+      <div className="sentence-profile-list" aria-label="Selected paragraph sentence profile">
+        {profile.distribution.map((bucket) => (
+          <div key={bucket.category} className="sentence-profile-item">
+            <span>{bucket.category}</span>
+            <div className="analytics-bar-track" aria-hidden="true">
+              <span
+                className="analytics-bar-fill sentence-fill"
+                style={{ width: barWidthPercent(bucket.count, maxSelectedSentenceCount) }}
+              />
+            </div>
+            <strong>{bucket.count}</strong>
+          </div>
+        ))}
+      </div>
+      <button
+        className="paragraph-target-generate"
+        type="button"
+        disabled={!revisionState.canRequest}
+        onClick={() => revisionState.requestRevision("improve_sentence_length")}
+      >
+        Make sentences more concise
+      </button>
+      {isSentenceRevisionLoading && <p className="analytics-empty">Generating revision...</p>}
+      {isSentenceRevisionError && (
+        <p className="analytics-empty">{revisionState.message || "A revision could not be generated. No changes were made."}</p>
+      )}
+      {isSentenceRevisionReady && (
+        <p className="analytics-empty">Revision suggestion is available in AI Writing Analysis.</p>
+      )}
+    </div>
+  );
+}
+
+function SentenceDistributionList({
+  distribution,
+  maxSentenceBucketCount,
+}: {
+  distribution: SentenceDistributionMetric[];
+  maxSentenceBucketCount: number;
+}) {
+  return (
+    <div className="analytics-bar-list sentence-distribution-list">
+      {distribution.map((bucket) => (
+        <div key={bucket.category} className="analytics-distribution-row">
+          <div className="analytics-distribution-label">
+            <span>{bucket.category}</span>
+            <small>{bucket.rangeLabel}</small>
+          </div>
+          <div className="analytics-bar-track" aria-hidden="true">
+            <span
+              className="analytics-bar-fill sentence-fill"
+              style={{ width: barWidthPercent(bucket.count, maxSentenceBucketCount) }}
+            />
+          </div>
+          <span className="analytics-bar-value">{bucket.count}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DisclosureToggle({
+  expanded,
+  label,
+  onToggle,
+}: {
+  expanded: boolean;
+  label: string;
+  onToggle: () => void;
+}) {
+  return (
+    <button className="paragraph-overview-toggle" type="button" aria-expanded={expanded} onClick={onToggle}>
+      <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>
+      {label}
+    </button>
+  );
 }
 
 function CountBarRow({
@@ -568,6 +746,25 @@ function CountBarRow({
       {content}
     </div>
   );
+}
+
+function buildSelectedSentenceProfile(
+  paragraph: ParagraphLengthMetric | undefined,
+  sentenceLengths: SentenceLengthMetric[],
+): SelectedSentenceProfile | undefined {
+  if (!paragraph) {
+    return undefined;
+  }
+
+  const sentences = sentenceLengths.filter((sentence) => sentence.paragraphId === paragraph.paragraphId);
+  const wordCount = sentences.reduce((total, sentence) => total + sentence.wordCount, 0);
+  return {
+    paragraphId: paragraph.paragraphId,
+    label: paragraph.label,
+    sentenceCount: sentences.length,
+    averageSentenceLength: sentences.length > 0 ? wordCount / sentences.length : 0,
+    distribution: buildSentenceDistribution(sentences),
+  };
 }
 
 function SelectedParagraphLengthView({

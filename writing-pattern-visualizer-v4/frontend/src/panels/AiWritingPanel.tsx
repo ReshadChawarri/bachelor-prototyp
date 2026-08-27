@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useParagraphAIAnalysis } from "../ai/useParagraphAIAnalysis";
 import { useParagraphRevisionSuggestion } from "../ai/useParagraphRevisionSuggestion";
+import type { ParagraphRevisionState } from "../ai/useParagraphRevisionSuggestion";
 import { RevisionSuggestionCard, REVISION_ACTION_LABELS } from "./RevisionSuggestionCard";
 import type {
   AcademicToneLevel,
@@ -21,6 +22,7 @@ interface AiWritingPanelProps {
   selectedParagraphId: string | null;
   language?: AnalyticsLanguage;
   onAcceptRevision?: (suggestion: SuggestRevisionResponse) => ParagraphRevisionApplyResult;
+  revisionState?: ParagraphRevisionState;
 }
 
 const REVISION_ACTIONS: Array<{ action: ParagraphRevisionAction; label: string }> = [
@@ -35,9 +37,11 @@ export function AiWritingPanel({
   selectedParagraphId,
   language = "English",
   onAcceptRevision,
+  revisionState: externalRevisionState,
 }: AiWritingPanelProps) {
   const paragraphAnalysisState = useParagraphAIAnalysis(document, selectedParagraph, selectedParagraphId, language);
-  const revisionState = useParagraphRevisionSuggestion(document, selectedParagraph, selectedParagraphId, language);
+  const localRevisionState = useParagraphRevisionSuggestion(document, selectedParagraph, selectedParagraphId, language);
+  const revisionState = externalRevisionState ?? localRevisionState;
   const [acceptMessage, setAcceptMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -182,6 +186,16 @@ function ParagraphAIAnalysisPanel({
             </div>
           </dl>
         </div>
+      )}
+
+      {analysisState.status !== "success" && revisionState.suggestion && selectedParagraph && (
+        <RevisionActionsSection
+          canShowActions
+          revisionState={revisionState}
+          selectedParagraph={selectedParagraph}
+          acceptMessage={acceptMessage}
+          onAcceptRevision={onAcceptRevision}
+        />
       )}
     </section>
   );

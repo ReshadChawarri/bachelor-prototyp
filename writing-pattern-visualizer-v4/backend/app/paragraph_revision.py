@@ -37,12 +37,41 @@ MIN_LENGTH_ADJUSTMENT_RATIO = 0.5
 MAX_LENGTH_ADJUSTMENT_RATIO = 1.75
 LENGTH_TARGET_TOLERANCE_PERCENT = 0.05
 LENGTH_TARGET_TOLERANCE_MIN_WORDS = 6
+SENTENCE_REVISION_WORD_DRIFT_RATIO = 0.35
+SENTENCE_REVISION_MIN_WORD_DRIFT = 12
+SENTENCE_SHORT_MAX_WORDS = 7
+SENTENCE_MEDIUM_MAX_WORDS = 20
+SENTENCE_LONG_MAX_WORDS = 30
+SENTENCE_CATEGORIES = ("Short", "Medium", "Long", "Very long")
+SENTENCE_RANGE_LABELS: dict[str, str] = {
+    "Short": "1-7 words",
+    "Medium": "8-20 words",
+    "Long": "21-30 words",
+    "Very long": "31+ words",
+}
+COMMON_SENTENCE_ABBREVIATIONS = [
+    "e.g.",
+    "i.e.",
+    "etc.",
+    "fig.",
+    "dr.",
+    "mr.",
+    "mrs.",
+    "ms.",
+    "prof.",
+    "vs.",
+    "cf.",
+    "no.",
+]
+ABBREVIATION_DOT_PLACEHOLDER = "<DOT>"
+SENTENCE_PATTERN = re.compile(r"[^.!?]+(?:[.!?]+[\"')\]]*)+|[^.!?]+$")
 
 ParagraphRevisionAction = Literal[
     "improve_clarity",
     "improve_academic_tone",
     "improve_transition",
     "adjust_paragraph_length",
+    "improve_sentence_length",
 ]
 
 ACTION_LABELS: dict[str, str] = {
@@ -50,6 +79,7 @@ ACTION_LABELS: dict[str, str] = {
     "improve_academic_tone": "Improve academic tone",
     "improve_transition": "Improve transition / coherence",
     "adjust_paragraph_length": "Adjust paragraph length",
+    "improve_sentence_length": "Improve sentence length",
 }
 
 ACTION_INSTRUCTIONS: dict[str, str] = {
@@ -74,6 +104,13 @@ If shortening, tighten redundant wording and overlapping phrasing while preservi
 numbers, and factual claims.
 If lengthening, clarify existing ideas and make supported relationships more explicit. Do not invent examples,
 evidence, citations, statistics, arguments, results, or factual details to reach the target.
+""".strip(),
+    "improve_sentence_length": """
+Improve readability by making the target paragraph's sentence structure more concise.
+Shorten unnecessarily long sentences, split overloaded sentences where appropriate, reduce excessive clause nesting,
+clarify referents, and preserve logical connections between sentences.
+The goal is sentence restructuring, not a paragraph-length rewrite. Keep the overall paragraph content and length
+reasonably similar unless small wording changes naturally occur.
 """.strip(),
 }
 
@@ -147,6 +184,21 @@ class LengthAdjustmentMetadata(StrictModel):
     withinTolerance: bool
 
 
+class SentenceDistributionCount(StrictModel):
+    category: str
+    count: int = Field(ge=0)
+    rangeLabel: str
+
+
+class SentenceLengthRevisionMetadata(StrictModel):
+    originalSentenceCount: int = Field(ge=0)
+    revisedSentenceCount: int = Field(ge=0)
+    originalAverageSentenceLength: float = Field(ge=0)
+    revisedAverageSentenceLength: float = Field(ge=0)
+    originalDistribution: list[SentenceDistributionCount]
+    revisedDistribution: list[SentenceDistributionCount]
+
+
 class ParagraphRevisionResponse(StrictModel):
     documentId: str
     sourceRevision: int
@@ -158,6 +210,7 @@ class ParagraphRevisionResponse(StrictModel):
     revisionVersion: str
     suggestion: ParagraphRevisionSuggestion
     length: LengthAdjustmentMetadata | None = None
+    sentence: SentenceLengthRevisionMetadata | None = None
 
 
 @dataclass(frozen=True)
@@ -255,6 +308,7 @@ class ParagraphRevisionService:
     def suggest_revision(self, request: ParagraphRevisionRequest) -> ParagraphRevisionResponse:
         ensure_analyzable_text(request.paragraph.text)
         length_metadata: LengthAdjustmentMetadata | None = None
+        sentence_metadata: SentenceLengthRevisionMetadata | None = None
         original_word_count = count_revision_words(request.paragraph.text)
         if request.action == "adjust_paragraph_length":
             ensure_supported_length_target(original_word_count, request.targetWordCount)
@@ -279,6 +333,8 @@ class ParagraphRevisionService:
                 revisedWordCount=revised_word_count,
                 withinTolerance=is_within_length_target_tolerance(revised_word_count, target_word_count),
             )
+        if request.action == "improve_sentence_length":
+            sentence_metadata = validate_sentence_length_revision(request.paragraph.text, suggestion.revisedText)
         return ParagraphRevisionResponse(
             documentId=request.documentId,
             sourceRevision=request.revision,
@@ -290,6 +346,7 @@ class ParagraphRevisionService:
             revisionVersion=PARAGRAPH_REVISION_VERSION,
             suggestion=suggestion,
             length=length_metadata,
+            sentence=sentence_metadata,
         )
 
 
@@ -302,6 +359,7 @@ def build_paragraph_revision_prompt(request: ParagraphRevisionRequest) -> Revisi
     action_instruction = ACTION_INSTRUCTIONS[request.action]
     action_label = ACTION_LABELS[request.action]
     length_instruction = build_length_adjustment_prompt_fragment(request)
+    sentence_instruction = build_sentence_length_prompt_fragment(request)
 
     user_message = f"""
 DOCUMENT LANGUAGE
@@ -318,6 +376,9 @@ ACTION-SPECIFIC INSTRUCTIONS
 
 LENGTH TARGET
 {length_instruction}
+
+SENTENCE STRUCTURE TARGET
+{sentence_instruction}
 
 NEAREST HEADING (CONTEXT ONLY)
 {request.context.nearestHeading or "[none supplied]"}
@@ -406,6 +467,129 @@ def build_length_adjustment_prompt_fragment(request: ParagraphRevisionRequest) -
         f"Supported target range for this paragraph: {minimum}-{maximum} words. "
         "Do not claim exactness; produce the safest revision near the target while preserving meaning."
     )
+
+
+def build_sentence_length_prompt_fragment(request: ParagraphRevisionRequest) -> str:
+    if request.action != "improve_sentence_length":
+        return "[not applicable]"
+
+    original = sentence_length_metrics(request.paragraph.text)
+    very_long = distribution_count(original, "Very long")
+    long = distribution_count(original, "Long")
+    return (
+        f"Original sentence count: {original.sentence_count}. "
+        f"Original average sentence length: {original.average_sentence_length:.1f} words. "
+        f"Long sentences: {long}. Very long sentences: {very_long}. "
+        "Make sentence structure more concise where useful, especially by splitting overloaded long sentences. "
+        "Do not chase an ideal sentence length, do not fragment already clear prose, and do not optimize total paragraph word count."
+    )
+
+
+@dataclass(frozen=True)
+class SentenceLengthMetrics:
+    sentence_count: int
+    average_sentence_length: float
+    distribution: dict[str, int]
+    word_count: int
+
+
+def sentence_length_metrics(text: str) -> SentenceLengthMetrics:
+    sentences = split_revision_sentences(text)
+    sentence_word_counts = [count_revision_words(sentence) for sentence in sentences]
+    distribution = {category: 0 for category in SENTENCE_CATEGORIES}
+    for word_count in sentence_word_counts:
+        distribution[categorize_revision_sentence(word_count)] += 1
+
+    total_words = sum(sentence_word_counts)
+    return SentenceLengthMetrics(
+        sentence_count=len(sentence_word_counts),
+        average_sentence_length=total_words / len(sentence_word_counts) if sentence_word_counts else 0,
+        distribution=distribution,
+        word_count=count_revision_words(text),
+    )
+
+
+def split_revision_sentences(text: str) -> list[str]:
+    normalized = re.sub(r"\s+", " ", text.strip())
+    if not normalized:
+        return []
+
+    protected = re.sub(r"(\d)\.(\d)", rf"\1{ABBREVIATION_DOT_PLACEHOLDER}\2", normalized)
+    for abbreviation in COMMON_SENTENCE_ABBREVIATIONS:
+        escaped = re.escape(abbreviation)
+        protected = re.sub(
+            escaped,
+            lambda match: match.group(0).replace(".", ABBREVIATION_DOT_PLACEHOLDER),
+            protected,
+            flags=re.IGNORECASE,
+        )
+
+    matches = SENTENCE_PATTERN.findall(protected)
+    return [
+        sentence.replace(ABBREVIATION_DOT_PLACEHOLDER, ".").strip()
+        for sentence in matches
+        if count_revision_words(sentence.replace(ABBREVIATION_DOT_PLACEHOLDER, ".")) > 0
+    ]
+
+
+def categorize_revision_sentence(word_count: int) -> str:
+    if word_count <= SENTENCE_SHORT_MAX_WORDS:
+        return "Short"
+    if word_count <= SENTENCE_MEDIUM_MAX_WORDS:
+        return "Medium"
+    if word_count <= SENTENCE_LONG_MAX_WORDS:
+        return "Long"
+    return "Very long"
+
+
+def validate_sentence_length_revision(original_text: str, revised_text: str) -> SentenceLengthRevisionMetadata:
+    original = sentence_length_metrics(original_text)
+    revised = sentence_length_metrics(revised_text)
+
+    if not has_sentence_structure_change(original, revised):
+        raise ParagraphRevisionGuardrailError("Sentence structure did not change meaningfully.")
+    if has_excessive_sentence_revision_word_drift(original.word_count, revised.word_count):
+        raise ParagraphRevisionGuardrailError("Sentence revision changed paragraph length too much.")
+
+    return SentenceLengthRevisionMetadata(
+        originalSentenceCount=original.sentence_count,
+        revisedSentenceCount=revised.sentence_count,
+        originalAverageSentenceLength=round(original.average_sentence_length, 1),
+        revisedAverageSentenceLength=round(revised.average_sentence_length, 1),
+        originalDistribution=sentence_distribution_counts(original),
+        revisedDistribution=sentence_distribution_counts(revised),
+    )
+
+
+def has_sentence_structure_change(original: SentenceLengthMetrics, revised: SentenceLengthMetrics) -> bool:
+    original_long = distribution_count(original, "Long") + distribution_count(original, "Very long")
+    revised_long = distribution_count(revised, "Long") + distribution_count(revised, "Very long")
+    return (
+        revised.average_sentence_length <= original.average_sentence_length - 1
+        or revised_long < original_long
+        or distribution_count(revised, "Very long") < distribution_count(original, "Very long")
+        or (revised.sentence_count > original.sentence_count and revised.average_sentence_length < original.average_sentence_length)
+    )
+
+
+def has_excessive_sentence_revision_word_drift(original_word_count: int, revised_word_count: int) -> bool:
+    allowed_drift = max(SENTENCE_REVISION_MIN_WORD_DRIFT, round(original_word_count * SENTENCE_REVISION_WORD_DRIFT_RATIO))
+    return abs(revised_word_count - original_word_count) > allowed_drift
+
+
+def sentence_distribution_counts(metrics: SentenceLengthMetrics) -> list[SentenceDistributionCount]:
+    return [
+        SentenceDistributionCount(
+            category=category,
+            count=metrics.distribution.get(category, 0),
+            rangeLabel=SENTENCE_RANGE_LABELS[category],
+        )
+        for category in SENTENCE_CATEGORIES
+    ]
+
+
+def distribution_count(metrics: SentenceLengthMetrics, category: str) -> int:
+    return metrics.distribution.get(category, 0)
 
 
 def protected_counter(pattern: re.Pattern[str], text: str) -> Counter[str]:
