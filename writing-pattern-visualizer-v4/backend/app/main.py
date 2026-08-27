@@ -2,6 +2,23 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from .config import get_settings
+from .document_analytics import (
+    DocumentAnalyticsRequest,
+    DocumentAnalyticsResponse,
+    analyze_document,
+)
+from .paragraph_ai_analysis import (
+    ParagraphAIAnalysisError,
+    ParagraphAIAnalysisService,
+    ParagraphAnalysisRequest,
+    ParagraphAnalysisResponse,
+)
+from .paragraph_revision import (
+    ParagraphRevisionRequest,
+    ParagraphRevisionResponse,
+    ParagraphRevisionService,
+)
 from .pdf_import import PdfImportError, PdfImportResponse, extract_pdf_content
 
 
@@ -9,6 +26,8 @@ class HealthResponse(BaseModel):
     status: str
     service: str
     phase: str
+    aiConfigured: bool
+    openaiModel: str
 
 
 app = FastAPI(
@@ -31,10 +50,13 @@ app.add_middleware(
 
 @app.get("/api/health", response_model=HealthResponse)
 def health() -> HealthResponse:
+    settings = get_settings()
     return HealthResponse(
         status="ok",
         service="writing-pattern-visualizer-v4-backend",
-        phase="phase-2",
+        phase="phase-6a",
+        aiConfigured=settings.ai_configured,
+        openaiModel=settings.openai_model,
     )
 
 
@@ -49,3 +71,32 @@ async def import_pdf(file: UploadFile = File(...)) -> PdfImportResponse:
         return extract_pdf_content(raw_pdf, filename)
     except PdfImportError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/analytics/document", response_model=DocumentAnalyticsResponse)
+def document_analytics(request: DocumentAnalyticsRequest) -> DocumentAnalyticsResponse:
+    return analyze_document(request)
+
+
+@app.post("/api/ai/analyze-paragraph", response_model=ParagraphAnalysisResponse)
+def analyze_paragraph(request: ParagraphAnalysisRequest) -> ParagraphAnalysisResponse:
+    service = getattr(app.state, "paragraph_ai_analysis_service", None)
+    if service is None:
+        service = ParagraphAIAnalysisService()
+
+    try:
+        return service.analyze(request)
+    except ParagraphAIAnalysisError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.user_message) from exc
+
+
+@app.post("/api/ai/suggest-revision", response_model=ParagraphRevisionResponse)
+def suggest_revision(request: ParagraphRevisionRequest) -> ParagraphRevisionResponse:
+    service = getattr(app.state, "paragraph_revision_service", None)
+    if service is None:
+        service = ParagraphRevisionService()
+
+    try:
+        return service.suggest_revision(request)
+    except ParagraphAIAnalysisError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.user_message) from exc

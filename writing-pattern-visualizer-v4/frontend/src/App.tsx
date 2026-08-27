@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { importPdf } from "./api/pdfImport";
+import { useBackendWritingAnalytics } from "./analytics/useBackendWritingAnalytics";
 import { DocumentWorkspace } from "./editor/DocumentWorkspace";
 import type { DocumentModel, EditorSelection, ImportRequest } from "./types/document";
 
@@ -27,6 +28,7 @@ function App() {
   const [importRequest, setImportRequest] = useState<ImportRequest | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const importRequestCounter = useRef(0);
+  const backendAnalytics = useBackendWritingAnalytics(documentModel, "English");
 
   const selectedParagraph = useMemo(
     () => documentModel.paragraphs.find((paragraph) => paragraph.id === selection.paragraphId),
@@ -118,6 +120,8 @@ function App() {
 
       <DocumentWorkspace
         title={documentTitle}
+        document={documentModel}
+        backendAnalytics={backendAnalytics}
         importRequest={importRequest}
         leftPanelOpen={leftPanelOpen}
         rightPanelOpen={rightPanelOpen}

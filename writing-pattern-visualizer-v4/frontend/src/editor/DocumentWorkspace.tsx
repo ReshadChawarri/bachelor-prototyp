@@ -1,15 +1,27 @@
 import { EditorContent, useEditor } from "@tiptap/react";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { MutableRefObject } from "react";
+import { clearAnalyticsHighlights, setAnalyticsHighlights } from "./analyticsHighlight";
 import { createEditorExtensions } from "./extensions";
 import { importedPdfToTipTapDocument } from "./importedDocument";
+import { findDocumentNodeTarget, selectDocumentNode, type NavigableNodeType } from "./navigation";
+import { replaceParagraphTextById } from "./revision";
 import { serializeDocument } from "./serializer";
 import { EditorToolbar } from "./EditorToolbar";
 import { WritingAnalyticsPanel } from "../panels/WritingAnalyticsPanel";
 import { AiWritingPanel } from "../panels/AiWritingPanel";
+import type {
+  ActiveAnalyticsHighlight,
+  AnalyticsHighlightRequest,
+  BackendAnalyticsState,
+} from "../types/backendAnalytics";
+import type { SuggestRevisionResponse } from "../types/aiAnalysis";
 import type { DocumentModel, EditorSelection, ImportRequest, ParagraphBlock } from "../types/document";
 
 interface DocumentWorkspaceProps {
   title: string;
+  document: DocumentModel;
+  backendAnalytics: BackendAnalyticsState;
   importRequest: ImportRequest | null;
   leftPanelOpen: boolean;
   rightPanelOpen: boolean;
@@ -29,6 +41,8 @@ const INITIAL_CONTENT = `
 
 export function DocumentWorkspace({
   title,
+  document,
+  backendAnalytics,
   importRequest,
   leftPanelOpen,
   rightPanelOpen,
@@ -40,6 +54,10 @@ export function DocumentWorkspace({
   onToggleRightPanel,
 }: DocumentWorkspaceProps) {
   const revisionRef = useRef(0);
+  const pageStageRef = useRef<HTMLDivElement | null>(null);
+  const highlightedNodeRef = useRef<HTMLElement | null>(null);
+  const highlightTimerRef = useRef<number | null>(null);
+  const [activeAnalyticsHighlight, setActiveAnalyticsHighlight] = useState<ActiveAnalyticsHighlight | null>(null);
 
   const publishDocument = useCallback(
     (editorInstance: NonNullable<ReturnType<typeof useEditor>>, nextRevision: number) => {
@@ -82,6 +100,121 @@ export function DocumentWorkspace({
     onSelectionChange({ paragraphId: getSelectedParagraphId(editor) });
   }, [editor, importRequest, onSelectionChange]);
 
+  useEffect(() => {
+    return () => {
+      clearNavigationHighlight(highlightedNodeRef, highlightTimerRef);
+    };
+  }, []);
+
+  const clearActiveAnalyticsHighlights = useCallback(() => {
+    if (editor) {
+      clearAnalyticsHighlights(editor);
+    }
+    setActiveAnalyticsHighlight(null);
+  }, [editor]);
+
+  const toggleAnalyticsHighlight = useCallback(
+    (request: AnalyticsHighlightRequest) => {
+      if (!editor) {
+        return;
+      }
+
+      const isSameHighlight =
+        activeAnalyticsHighlight?.type === request.type &&
+        activeAnalyticsHighlight.key === request.key &&
+        activeAnalyticsHighlight.revision === request.revision;
+
+      if (isSameHighlight) {
+        clearActiveAnalyticsHighlights();
+        return;
+      }
+
+      if (request.revision !== document.revision || request.occurrences.length === 0) {
+        clearActiveAnalyticsHighlights();
+        return;
+      }
+
+      const resolvedCount = setAnalyticsHighlights(
+        editor,
+        request.occurrences.map((occurrence) => ({
+          ...occurrence,
+          kind: request.type,
+        })),
+      );
+
+      if (resolvedCount !== request.occurrences.length) {
+        clearAnalyticsHighlights(editor);
+        setActiveAnalyticsHighlight(null);
+        return;
+      }
+
+      setActiveAnalyticsHighlight({
+        type: request.type,
+        key: request.key,
+        label: request.label,
+        revision: request.revision,
+        count: resolvedCount,
+      });
+    },
+    [activeAnalyticsHighlight, clearActiveAnalyticsHighlights, document.revision, editor],
+  );
+
+  useEffect(() => {
+    if (activeAnalyticsHighlight && activeAnalyticsHighlight.revision !== document.revision) {
+      clearActiveAnalyticsHighlights();
+    }
+  }, [activeAnalyticsHighlight, clearActiveAnalyticsHighlights, document.revision]);
+
+  useEffect(() => {
+    if (!activeAnalyticsHighlight) {
+      return;
+    }
+
+    const analyticsRevision = backendAnalytics.data?.revision;
+    if (backendAnalytics.error || (analyticsRevision !== undefined && analyticsRevision !== activeAnalyticsHighlight.revision)) {
+      clearActiveAnalyticsHighlights();
+    }
+  }, [activeAnalyticsHighlight, backendAnalytics.data?.revision, backendAnalytics.error, clearActiveAnalyticsHighlights]);
+
+  const navigateToDocumentNode = useCallback(
+    (nodeId: string, expectedType: NavigableNodeType) => {
+      if (!editor) {
+        return;
+      }
+
+      const target = findDocumentNodeTarget(editor, nodeId, expectedType);
+      if (!target) {
+        return;
+      }
+
+      const targetElement = editor.view.nodeDOM(target.position);
+      const didSelect = selectDocumentNode(editor, target);
+      if (!didSelect || !(targetElement instanceof HTMLElement)) {
+        return;
+      }
+
+      scrollElementIntoPageStage(targetElement, pageStageRef.current);
+      showNavigationHighlight(targetElement, highlightedNodeRef, highlightTimerRef);
+    },
+    [editor],
+  );
+
+  const acceptParagraphRevision = useCallback(
+    (suggestion: SuggestRevisionResponse) => {
+      if (!editor) {
+        return { applied: false as const, reason: "missing" as const };
+      }
+
+      return replaceParagraphTextById(
+        editor,
+        suggestion.paragraphId,
+        suggestion.sourceContentHash,
+        suggestion.suggestion.revisedText,
+      );
+    },
+    [editor],
+  );
+
   const selectedLabel = useMemo(
     () => selectedParagraph?.text || "Select a paragraph in the document to connect it with the panels.",
     [selectedParagraph],
@@ -100,9 +233,17 @@ export function DocumentWorkspace({
         </button>
         {leftPanelOpen && (
           <WritingAnalyticsPanel
+            document={document}
+            backendAnalytics={backendAnalytics}
             revision={revisionRef.current}
             selectedParagraph={selectedParagraph}
             selectedParagraphId={selection.paragraphId}
+            activeAnalyticsHighlight={activeAnalyticsHighlight}
+            onAcceptRevision={acceptParagraphRevision}
+            onNavigateToParagraph={(paragraphId) => navigateToDocumentNode(paragraphId, "paragraph")}
+            onNavigateToHeading={(headingId) => navigateToDocumentNode(headingId, "heading")}
+            onToggleAnalyticsHighlight={toggleAnalyticsHighlight}
+            onClearAnalyticsHighlights={clearActiveAnalyticsHighlights}
           />
         )}
       </aside>
@@ -114,7 +255,7 @@ export function DocumentWorkspace({
             <span key={index} className={index % 4 === 0 ? "ruler-tick major" : "ruler-tick"} />
           ))}
         </div>
-        <div className="page-stage">
+        <div className="page-stage" ref={pageStageRef}>
           <article className="document-page">
             {editor ? <EditorContent editor={editor} /> : <div className="editor-loading">Loading editor...</div>}
           </article>
@@ -135,7 +276,12 @@ export function DocumentWorkspace({
           {rightPanelOpen ? ">" : "<"}
         </button>
         {rightPanelOpen && (
-          <AiWritingPanel selectedParagraph={selectedParagraph} selectedParagraphId={selection.paragraphId} />
+          <AiWritingPanel
+            document={document}
+            selectedParagraph={selectedParagraph}
+            selectedParagraphId={selection.paragraphId}
+            onAcceptRevision={acceptParagraphRevision}
+          />
         )}
       </aside>
     </main>
@@ -152,4 +298,51 @@ function getSelectedParagraphId(editor: NonNullable<ReturnType<typeof useEditor>
     }
   }
   return null;
+}
+
+export function scrollElementIntoPageStage(targetElement: HTMLElement, pageStage: HTMLElement | null) {
+  if (!pageStage) {
+    return;
+  }
+
+  const targetRect = targetElement.getBoundingClientRect();
+  const stageRect = pageStage.getBoundingClientRect();
+  const targetOffset = targetRect.top - stageRect.top;
+  const comfortableOffset = stageRect.height * 0.32;
+
+  pageStage.scrollTo({
+    top: pageStage.scrollTop + targetOffset - comfortableOffset,
+    behavior: "smooth",
+  });
+}
+
+function showNavigationHighlight(
+  targetElement: HTMLElement,
+  highlightedNodeRef: MutableRefObject<HTMLElement | null>,
+  highlightTimerRef: MutableRefObject<number | null>,
+) {
+  clearNavigationHighlight(highlightedNodeRef, highlightTimerRef);
+
+  targetElement.classList.add("navigation-target-highlight");
+  highlightedNodeRef.current = targetElement;
+  highlightTimerRef.current = window.setTimeout(() => {
+    targetElement.classList.remove("navigation-target-highlight");
+    if (highlightedNodeRef.current === targetElement) {
+      highlightedNodeRef.current = null;
+    }
+    highlightTimerRef.current = null;
+  }, 1600);
+}
+
+function clearNavigationHighlight(
+  highlightedNodeRef: MutableRefObject<HTMLElement | null>,
+  highlightTimerRef: MutableRefObject<number | null>,
+) {
+  if (highlightTimerRef.current !== null) {
+    window.clearTimeout(highlightTimerRef.current);
+    highlightTimerRef.current = null;
+  }
+
+  highlightedNodeRef.current?.classList.remove("navigation-target-highlight");
+  highlightedNodeRef.current = null;
 }
