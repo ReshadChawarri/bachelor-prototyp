@@ -203,9 +203,12 @@ function renderPanel({
 }
 
 function revisionResponseFor(request: SuggestRevisionRequest): SuggestRevisionResponse {
-  const revisedText = request.targetWordCount
-    ? generatedWords("revised", request.targetWordCount + 2)
-    : "Revised paragraph text.";
+  const revisedText =
+    request.action === "improve_sentence_length"
+      ? "The revised paragraph splits a dense sentence. It keeps the same argument."
+      : request.targetWordCount
+        ? generatedWords("revised", request.targetWordCount + 2)
+        : "Revised paragraph text.";
 
   return {
     documentId: request.documentId,
@@ -227,6 +230,27 @@ function revisionResponseFor(request: SuggestRevisionRequest): SuggestRevisionRe
             targetWordCount: request.targetWordCount,
             revisedWordCount: request.targetWordCount + 2,
             withinTolerance: true,
+          }
+        : null,
+    sentence:
+      request.action === "improve_sentence_length"
+        ? {
+            originalSentenceCount: 1,
+            revisedSentenceCount: 2,
+            originalAverageSentenceLength: 34.2,
+            revisedAverageSentenceLength: 16.5,
+            originalDistribution: [
+              { category: "Short", count: 0, rangeLabel: "1-7 words" },
+              { category: "Medium", count: 0, rangeLabel: "8-20 words" },
+              { category: "Long", count: 0, rangeLabel: "21-30 words" },
+              { category: "Very long", count: 1, rangeLabel: "31+ words" },
+            ],
+            revisedDistribution: [
+              { category: "Short", count: 0, rangeLabel: "1-7 words" },
+              { category: "Medium", count: 2, rangeLabel: "8-20 words" },
+              { category: "Long", count: 0, rangeLabel: "21-30 words" },
+              { category: "Very long", count: 0, rangeLabel: "31+ words" },
+            ],
           }
         : null,
   };
@@ -257,8 +281,9 @@ describe("WritingAnalyticsPanel paragraph length focus", () => {
 
   it("updates the focused paragraph when editor selection changes", () => {
     const { rerender } = renderPanel();
+    const paragraphLengthSection = () => screen.getByLabelText("Paragraph length");
 
-    expect(screen.getByText("Selected paragraph · P2")).toBeInTheDocument();
+    expect(within(paragraphLengthSection()).getByText("Selected paragraph · P2")).toBeInTheDocument();
 
     rerender(
       <WritingAnalyticsPanel
@@ -270,9 +295,9 @@ describe("WritingAnalyticsPanel paragraph length focus", () => {
       />,
     );
 
-    expect(screen.getByText("Selected paragraph · P3")).toBeInTheDocument();
-    expect(currentWordCountElement(screen.getByLabelText("Paragraph length"))).toHaveTextContent("2 words");
-    expect(screen.queryByText("Selected paragraph · P2")).not.toBeInTheDocument();
+    expect(within(paragraphLengthSection()).getByText("Selected paragraph · P3")).toBeInTheDocument();
+    expect(currentWordCountElement(paragraphLengthSection())).toHaveTextContent("2 words");
+    expect(within(paragraphLengthSection()).queryByText("Selected paragraph · P2")).not.toBeInTheDocument();
   });
 
   it("updates the selected paragraph word count when the document changes", () => {
@@ -349,22 +374,25 @@ describe("WritingAnalyticsPanel paragraph length focus", () => {
     expect(within(paragraphLengthSection).queryByText("P1")).not.toBeInTheDocument();
   });
 
-  it("renders backend transition, repetition, and structure sections compactly", () => {
+  it("renders backend transition, repetition, and structure summaries collapsed by default", () => {
     renderPanel();
 
     const transitions = screen.getByLabelText("Transition words");
     expect(within(transitions).getByText("Total")).toBeInTheDocument();
     expect(within(transitions).getByText("5")).toBeInTheDocument();
-    expect(within(transitions).getByText("Addition")).toBeInTheDocument();
-    expect(within(transitions).getByText("Contrast")).toBeInTheDocument();
+    expect(within(transitions).getByRole("button", { name: "Show categories" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(within(transitions).queryByText("Addition")).not.toBeInTheDocument();
 
     const repetition = screen.getByLabelText("Repetition");
-    expect(within(repetition).getByText("writing")).toBeInTheDocument();
-    expect(within(repetition).getByText("privacy")).toBeInTheDocument();
+    expect(within(repetition).getByText("2 repeated terms")).toBeInTheDocument();
+    expect(within(repetition).queryByText("writing")).not.toBeInTheDocument();
 
     const structure = screen.getByLabelText("Document structure");
-    expect(within(structure).getByText("Abstract")).toBeInTheDocument();
-    expect(within(structure).getByText("2.1 Participants")).toBeInTheDocument();
+    expect(within(structure).getByText("2 headings")).toBeInTheDocument();
+    expect(within(structure).queryByText("Abstract")).not.toBeInTheDocument();
   });
 
   it("renders neutral backend empty states", () => {
@@ -390,6 +418,7 @@ describe("WritingAnalyticsPanel paragraph length focus", () => {
     renderPanel({ onToggleAnalyticsHighlight });
 
     const transitions = screen.getByLabelText("Transition words");
+    await user.click(within(transitions).getByRole("button", { name: "Show categories" }));
     await user.click(within(transitions).getByRole("button", { name: /Highlight 2 Contrast transition occurrences/i }));
 
     expect(onToggleAnalyticsHighlight).toHaveBeenCalledWith({
@@ -411,6 +440,7 @@ describe("WritingAnalyticsPanel paragraph length focus", () => {
     renderPanel({ onToggleAnalyticsHighlight });
 
     const repetition = screen.getByLabelText("Repetition");
+    await user.click(within(repetition).getByRole("button", { name: "Show repeated terms" }));
     await user.click(within(repetition).getByRole("button", { name: /Highlight 4 occurrences of writing/i }));
 
     expect(onToggleAnalyticsHighlight).toHaveBeenCalledWith({
@@ -442,7 +472,9 @@ describe("WritingAnalyticsPanel paragraph length focus", () => {
     });
 
     expect(screen.getByText("Highlighting 2 occurrences of privacy")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Highlight 2 occurrences of privacy/i })).toHaveAttribute(
+    const repetition = screen.getByLabelText("Repetition");
+    await user.click(within(repetition).getByRole("button", { name: "Show repeated terms" }));
+    expect(within(repetition).getByRole("button", { name: /Highlight 2 occurrences of privacy/i })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
@@ -522,6 +554,7 @@ describe("WritingAnalyticsPanel paragraph length focus", () => {
       }),
     });
 
+    await user.click(screen.getByRole("button", { name: "Show structure" }));
     const headingButtons = screen.getAllByRole("button", { name: "Results" });
     await user.click(headingButtons[1]);
 
@@ -543,8 +576,65 @@ describe("WritingAnalyticsPanel paragraph length focus", () => {
     });
 
     const structure = screen.getByLabelText("Document structure");
+    fireEvent.click(within(structure).getByRole("button", { name: "Show structure" }));
     expect(within(structure).getByText("1 Introduction")).toBeInTheDocument();
     expect(within(structure).queryByRole("button", { name: "1 Introduction" })).not.toBeInTheDocument();
+  });
+
+  it("shows selected paragraph sentence metrics and keeps document distribution collapsed by default", () => {
+    renderPanel();
+
+    const sentenceSection = screen.getByLabelText("Sentence length distribution");
+
+    expect(within(sentenceSection).getByText("Selected paragraph · P2")).toBeInTheDocument();
+    expect(within(sentenceSection).getByText("Avg. sentence")).toBeInTheDocument();
+    expect(within(sentenceSection).getByText("5.0 words")).toBeInTheDocument();
+    expect(within(sentenceSection).getByRole("button", { name: "Make sentences more concise" })).toBeInTheDocument();
+    expect(within(sentenceSection).getByRole("button", { name: "Document distribution" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(sentenceSection.querySelector(".sentence-distribution-list")).toBeNull();
+  });
+
+  it("expands sentence document distribution independently", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    const sentenceSection = screen.getByLabelText("Sentence length distribution");
+    await user.click(within(sentenceSection).getByRole("button", { name: "Document distribution" }));
+
+    expect(within(sentenceSection).getByRole("button", { name: "Document distribution" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(sentenceSection.querySelector(".sentence-distribution-list")).toBeTruthy();
+  });
+
+  it("requests selected paragraph sentence-length revision through the existing revision endpoint", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    await user.click(screen.getByRole("button", { name: "Make sentences more concise" }));
+
+    expect(mockedSuggestRevision).toHaveBeenCalledTimes(1);
+    expect(mockedSuggestRevision.mock.calls[0][0]).toMatchObject({
+      action: "improve_sentence_length",
+      paragraph: {
+        paragraphId: "p-stable-2",
+      },
+    });
+  });
+
+  it("reports when sentence revision is available in the AI panel without rendering another preview on the left", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    await user.click(screen.getByRole("button", { name: "Make sentences more concise" }));
+    await flushPromises();
+
+    expect(screen.getByText("Revision suggestion is available in AI Writing Analysis.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Sentence revision metrics")).not.toBeInTheDocument();
   });
 
   it("defaults the paragraph-length target to the selected paragraph word count", () => {

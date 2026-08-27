@@ -13,6 +13,7 @@ from app.paragraph_revision import (
     OpenAIResponsesParagraphRevisionClient,
     PARAGRAPH_REVISION_INSTRUCTIONS,
     PARAGRAPH_REVISION_VERSION,
+    SENTENCE_REVISION_WORD_DRIFT_RATIO,
     LengthAdjustmentMetadata,
     ParagraphRevisionGuardrailError,
     ParagraphRevisionRequest,
@@ -24,6 +25,7 @@ from app.paragraph_revision import (
     count_revision_words,
     is_within_length_target_tolerance,
     length_target_bounds,
+    sentence_length_metrics,
     validate_revision_guardrails,
 )
 
@@ -62,6 +64,27 @@ def length_adjustment_text() -> str:
         "This paragraph describes how participants interpreted privacy notices in the study and explains why "
         "interface wording shaped their expectations about data practices, consent, and platform accountability "
         "during the evaluation."
+    )
+
+
+def sentence_revision_text() -> str:
+    return (
+        "In 2024, the study examined privacy notices because students encountered multiple interface explanations "
+        "that described data collection, consent, and platform accountability in a single dense sequence, which made "
+        "the relationship between wording, trust, and academic reflection difficult to inspect [1, 5]. "
+        "This second sentence is also very long because it connects observed behavior, the interpretation of "
+        "institutional policies, and implications for writing support tools without giving the reader a clear pause "
+        "between those ideas."
+    )
+
+
+def sentence_revision_suggestion_text() -> str:
+    return (
+        "In 2024, the study examined privacy notices because students encountered multiple interface explanations "
+        "about data collection, consent, and platform accountability [1, 5]. "
+        "These explanations made the relationship between wording, trust, and academic reflection difficult to inspect. "
+        "The second point connects observed behavior with interpretations of institutional policies. "
+        "It also links those interpretations to implications for writing support tools."
     )
 
 
@@ -222,6 +245,21 @@ class ParagraphRevisionServiceTests(unittest.TestCase):
         self.assertIn("Requested direction: shorten", prompt.user_message)
         self.assertIn("Do not invent examples", PARAGRAPH_REVISION_INSTRUCTIONS + prompt.user_message)
 
+    def test_sentence_length_prompt_includes_sentence_policy(self):
+        request = ParagraphRevisionRequest.model_validate(
+            request_payload(
+                action="improve_sentence_length",
+                paragraph={"paragraphId": "p-1", "text": sentence_revision_text()},
+            )
+        )
+
+        prompt = build_paragraph_revision_prompt(request)
+
+        self.assertIn("Improve sentence length", prompt.user_message)
+        self.assertIn("Original average sentence length", prompt.user_message)
+        self.assertIn("Do not chase an ideal sentence length", prompt.user_message)
+        self.assertIn("Only rewrite the TARGET PARAGRAPH", PARAGRAPH_REVISION_INSTRUCTIONS)
+
     def test_length_adjustment_response_contains_computed_word_counts(self):
         request = ParagraphRevisionRequest.model_validate(
             request_payload(
@@ -309,6 +347,86 @@ class ParagraphRevisionServiceTests(unittest.TestCase):
         self.assertTrue(is_within_length_target_tolerance(116, 120))
         self.assertTrue(is_within_length_target_tolerance(126, 120))
         self.assertFalse(is_within_length_target_tolerance(130, 120))
+
+    def test_sentence_length_response_contains_computed_sentence_metrics(self):
+        request = ParagraphRevisionRequest.model_validate(
+            request_payload(
+                action="improve_sentence_length",
+                paragraph={"paragraphId": "p-1", "text": sentence_revision_text()},
+            )
+        )
+        suggestion = ParagraphRevisionSuggestion(
+            revisedText=sentence_revision_suggestion_text(),
+            summary="Splits overloaded sentences while preserving the paragraph's argument.",
+        )
+        service = ParagraphRevisionService(
+            settings=AppSettings(openai_api_key="sk-test", openai_model="gpt-custom"),
+            client=OpenAIResponsesParagraphRevisionClient(
+                settings=AppSettings(openai_api_key="sk-test", openai_model="gpt-custom"),
+                raw_client=FakeOpenAIClient(suggestion),
+            ),
+        )
+
+        response = service.suggest_revision(request)
+
+        self.assertIsNotNone(response.sentence)
+        self.assertEqual(response.sentence.originalSentenceCount, 2)
+        self.assertGreater(response.sentence.revisedSentenceCount, response.sentence.originalSentenceCount)
+        self.assertLess(response.sentence.revisedAverageSentenceLength, response.sentence.originalAverageSentenceLength)
+        self.assertEqual(response.sentence.originalDistribution[-1].category, "Very long")
+
+    def test_sentence_length_revision_rejects_unchanged_sentence_structure(self):
+        request = ParagraphRevisionRequest.model_validate(
+            request_payload(
+                action="improve_sentence_length",
+                paragraph={"paragraphId": "p-1", "text": sentence_revision_text()},
+            )
+        )
+        service = ParagraphRevisionService(
+            settings=AppSettings(openai_api_key="sk-test", openai_model="gpt-custom"),
+            client=OpenAIResponsesParagraphRevisionClient(
+                settings=AppSettings(openai_api_key="sk-test", openai_model="gpt-custom"),
+                raw_client=FakeOpenAIClient(
+                    ParagraphRevisionSuggestion(
+                        revisedText=sentence_revision_text(),
+                        summary="Keeps the sentence structure unchanged.",
+                    )
+                ),
+            ),
+        )
+
+        with self.assertRaises(ParagraphRevisionGuardrailError):
+            service.suggest_revision(request)
+
+    def test_sentence_length_revision_rejects_excessive_paragraph_word_drift(self):
+        request = ParagraphRevisionRequest.model_validate(
+            request_payload(
+                action="improve_sentence_length",
+                paragraph={"paragraphId": "p-1", "text": sentence_revision_text()},
+            )
+        )
+        service = ParagraphRevisionService(
+            settings=AppSettings(openai_api_key="sk-test", openai_model="gpt-custom"),
+            client=OpenAIResponsesParagraphRevisionClient(
+                settings=AppSettings(openai_api_key="sk-test", openai_model="gpt-custom"),
+                raw_client=FakeOpenAIClient(
+                    ParagraphRevisionSuggestion(
+                        revisedText="In 2024, privacy notices shaped student interpretation [1, 5].",
+                        summary="Over-compresses the paragraph.",
+                    )
+                ),
+            ),
+        )
+
+        with self.assertRaises(ParagraphRevisionGuardrailError):
+            service.suggest_revision(request)
+
+    def test_sentence_metrics_use_documented_thresholds_and_word_drift_policy(self):
+        metrics = sentence_length_metrics("One two three. " + " ".join(f"word{i}" for i in range(31)) + ".")
+
+        self.assertEqual(metrics.distribution["Short"], 1)
+        self.assertEqual(metrics.distribution["Very long"], 1)
+        self.assertEqual(SENTENCE_REVISION_WORD_DRIFT_RATIO, 0.35)
 
     def test_valid_structured_revision_validates(self):
         suggestion = ParagraphRevisionSuggestion.model_validate(valid_suggestion().model_dump())

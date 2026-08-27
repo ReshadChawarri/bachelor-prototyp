@@ -2,6 +2,7 @@ import { EditorContent, useEditor } from "@tiptap/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
 import { clearAnalyticsHighlights, setAnalyticsHighlights } from "./analyticsHighlight";
+import { useParagraphRevisionSuggestion } from "../ai/useParagraphRevisionSuggestion";
 import { createEditorExtensions } from "./extensions";
 import { importedPdfToTipTapDocument } from "./importedDocument";
 import { findDocumentNodeTarget, selectDocumentNode, type NavigableNodeType } from "./navigation";
@@ -58,6 +59,7 @@ export function DocumentWorkspace({
   const highlightedNodeRef = useRef<HTMLElement | null>(null);
   const highlightTimerRef = useRef<number | null>(null);
   const [activeAnalyticsHighlight, setActiveAnalyticsHighlight] = useState<ActiveAnalyticsHighlight | null>(null);
+  const aiPanelRevisionState = useParagraphRevisionSuggestion(document, selectedParagraph, selection.paragraphId);
 
   const publishDocument = useCallback(
     (editorInstance: NonNullable<ReturnType<typeof useEditor>>, nextRevision: number) => {
@@ -239,6 +241,7 @@ export function DocumentWorkspace({
             selectedParagraph={selectedParagraph}
             selectedParagraphId={selection.paragraphId}
             activeAnalyticsHighlight={activeAnalyticsHighlight}
+            sentenceRevisionState={aiPanelRevisionState}
             onAcceptRevision={acceptParagraphRevision}
             onNavigateToParagraph={(paragraphId) => navigateToDocumentNode(paragraphId, "paragraph")}
             onNavigateToHeading={(headingId) => navigateToDocumentNode(headingId, "heading")}
@@ -281,6 +284,7 @@ export function DocumentWorkspace({
             selectedParagraph={selectedParagraph}
             selectedParagraphId={selection.paragraphId}
             onAcceptRevision={acceptParagraphRevision}
+            revisionState={aiPanelRevisionState}
           />
         )}
       </aside>

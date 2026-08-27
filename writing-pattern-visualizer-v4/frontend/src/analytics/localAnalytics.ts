@@ -45,9 +45,9 @@ export const SENTENCE_LENGTH_THRESHOLDS = {
   longMaxWords: 30,
 } as const;
 
-const SENTENCE_DISTRIBUTION_ORDER: SentenceLengthCategory[] = ["Short", "Medium", "Long", "Very long"];
+export const SENTENCE_DISTRIBUTION_ORDER: SentenceLengthCategory[] = ["Short", "Medium", "Long", "Very long"];
 
-const SENTENCE_RANGE_LABELS: Record<SentenceLengthCategory, string> = {
+export const SENTENCE_RANGE_LABELS: Record<SentenceLengthCategory, string> = {
   Short: "1-7 words",
   Medium: "8-20 words",
   Long: "21-30 words",
@@ -160,7 +160,7 @@ function isExcludedFromProseAnalytics(block: ParagraphBlock): boolean {
   return !isProseParagraph(block) && !isHeadingBlock(block);
 }
 
-function buildSentenceDistribution(sentenceLengths: SentenceLengthMetric[]): SentenceDistributionMetric[] {
+export function buildSentenceDistribution(sentenceLengths: SentenceLengthMetric[]): SentenceDistributionMetric[] {
   const counts = new Map<SentenceLengthCategory, number>();
   sentenceLengths.forEach((sentence) => {
     counts.set(sentence.category, (counts.get(sentence.category) ?? 0) + 1);

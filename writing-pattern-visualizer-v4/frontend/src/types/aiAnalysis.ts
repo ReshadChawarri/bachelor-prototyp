@@ -91,7 +91,8 @@ export type ParagraphRevisionAction =
   | "improve_clarity"
   | "improve_academic_tone"
   | "improve_transition"
-  | "adjust_paragraph_length";
+  | "adjust_paragraph_length"
+  | "improve_sentence_length";
 
 export interface SuggestRevisionRequest {
   documentId: string;
@@ -124,6 +125,21 @@ export interface LengthAdjustmentMetadata {
   withinTolerance: boolean;
 }
 
+export interface SentenceDistributionCount {
+  category: string;
+  count: number;
+  rangeLabel: string;
+}
+
+export interface SentenceLengthRevisionMetadata {
+  originalSentenceCount: number;
+  revisedSentenceCount: number;
+  originalAverageSentenceLength: number;
+  revisedAverageSentenceLength: number;
+  originalDistribution: SentenceDistributionCount[];
+  revisedDistribution: SentenceDistributionCount[];
+}
+
 export interface SuggestRevisionResponse {
   documentId: string;
   sourceRevision: number;
@@ -135,6 +151,7 @@ export interface SuggestRevisionResponse {
   revisionVersion: string;
   suggestion: ParagraphRevisionSuggestion;
   length?: LengthAdjustmentMetadata | null;
+  sentence?: SentenceLengthRevisionMetadata | null;
 }
 
 export interface ParagraphRevisionRequestIdentity {
