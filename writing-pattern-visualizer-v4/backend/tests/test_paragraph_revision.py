@@ -9,15 +9,21 @@ from app.config import AppSettings
 from app.main import app
 from app.paragraph_revision import (
     ACTION_LABELS,
+    LENGTH_TARGET_TOLERANCE_MIN_WORDS,
     OpenAIResponsesParagraphRevisionClient,
     PARAGRAPH_REVISION_INSTRUCTIONS,
     PARAGRAPH_REVISION_VERSION,
+    LengthAdjustmentMetadata,
     ParagraphRevisionGuardrailError,
     ParagraphRevisionRequest,
     ParagraphRevisionResponse,
     ParagraphRevisionService,
+    ParagraphRevisionTargetError,
     ParagraphRevisionSuggestion,
     build_paragraph_revision_prompt,
+    count_revision_words,
+    is_within_length_target_tolerance,
+    length_target_bounds,
     validate_revision_guardrails,
 )
 
@@ -51,6 +57,14 @@ def valid_suggestion() -> ParagraphRevisionSuggestion:
     )
 
 
+def length_adjustment_text() -> str:
+    return (
+        "This paragraph describes how participants interpreted privacy notices in the study and explains why "
+        "interface wording shaped their expectations about data practices, consent, and platform accountability "
+        "during the evaluation."
+    )
+
+
 class FakeParagraphRevisionService:
     def __init__(self):
         self.requests: list[ParagraphRevisionRequest] = []
@@ -67,6 +81,14 @@ class FakeParagraphRevisionService:
             model="gpt-5.6-luna",
             revisionVersion=PARAGRAPH_REVISION_VERSION,
             suggestion=valid_suggestion(),
+            length=LengthAdjustmentMetadata(
+                originalWordCount=28,
+                targetWordCount=request.targetWordCount,
+                revisedWordCount=24,
+                withinTolerance=True,
+            )
+            if request.action == "adjust_paragraph_length"
+            else None,
         )
 
 
@@ -116,9 +138,29 @@ class ParagraphRevisionEndpointTests(unittest.TestCase):
 
         for action in ACTION_LABELS:
             with self.subTest(action=action):
-                response = self.client.post("/api/ai/suggest-revision", json=request_payload(action=action))
+                payload = request_payload(action=action)
+                if action == "adjust_paragraph_length":
+                    payload = request_payload(
+                        action=action,
+                        targetWordCount=24,
+                        paragraph={"paragraphId": "p-1", "text": length_adjustment_text()},
+                    )
+                response = self.client.post("/api/ai/suggest-revision", json=payload)
                 self.assertEqual(response.status_code, 200, response.text)
                 self.assertEqual(response.json()["action"], action)
+
+    def test_length_adjustment_requires_target_word_count(self):
+        response = self.client.post(
+            "/api/ai/suggest-revision",
+            json=request_payload(action="adjust_paragraph_length", paragraph={"paragraphId": "p-1", "text": length_adjustment_text()}),
+        )
+
+        self.assertEqual(response.status_code, 422)
+
+    def test_non_length_action_rejects_target_word_count(self):
+        response = self.client.post("/api/ai/suggest-revision", json=request_payload(targetWordCount=24))
+
+        self.assertEqual(response.status_code, 422)
 
     def test_invalid_action_is_rejected(self):
         response = self.client.post("/api/ai/suggest-revision", json=request_payload(action="rewrite_everything"))
@@ -163,6 +205,110 @@ class ParagraphRevisionServiceTests(unittest.TestCase):
         self.assertIn("CONTEXT ONLY", prompt.user_message)
         self.assertIn("Improve transition / coherence", prompt.user_message)
         self.assertIn(request.paragraph.text, prompt.user_message)
+
+    def test_length_adjustment_prompt_includes_target_policy_and_direction(self):
+        request = ParagraphRevisionRequest.model_validate(
+            request_payload(
+                action="adjust_paragraph_length",
+                targetWordCount=24,
+                paragraph={"paragraphId": "p-1", "text": length_adjustment_text()},
+            )
+        )
+
+        prompt = build_paragraph_revision_prompt(request)
+
+        self.assertIn("Adjust paragraph length", prompt.user_message)
+        self.assertIn("Target word count: approximately 24 words", prompt.user_message)
+        self.assertIn("Requested direction: shorten", prompt.user_message)
+        self.assertIn("Do not invent examples", PARAGRAPH_REVISION_INSTRUCTIONS + prompt.user_message)
+
+    def test_length_adjustment_response_contains_computed_word_counts(self):
+        request = ParagraphRevisionRequest.model_validate(
+            request_payload(
+                action="adjust_paragraph_length",
+                targetWordCount=24,
+                paragraph={"paragraphId": "p-1", "text": length_adjustment_text()},
+            )
+        )
+        suggestion = ParagraphRevisionSuggestion(
+            revisedText=(
+                "This paragraph explains how participants interpreted privacy notices and why interface wording shaped "
+                "their expectations about data practices, consent, and platform accountability."
+            ),
+            summary="Condenses redundant phrasing while preserving the paragraph's core meaning.",
+        )
+        service = ParagraphRevisionService(
+            settings=AppSettings(openai_api_key="sk-test", openai_model="gpt-custom"),
+            client=OpenAIResponsesParagraphRevisionClient(
+                settings=AppSettings(openai_api_key="sk-test", openai_model="gpt-custom"),
+                raw_client=FakeOpenAIClient(suggestion),
+            ),
+        )
+
+        response = service.suggest_revision(request)
+
+        self.assertIsNotNone(response.length)
+        self.assertEqual(response.length.originalWordCount, count_revision_words(length_adjustment_text()))
+        self.assertEqual(response.length.targetWordCount, 24)
+        self.assertEqual(response.length.revisedWordCount, count_revision_words(suggestion.revisedText))
+        self.assertEqual(response.length.withinTolerance, is_within_length_target_tolerance(response.length.revisedWordCount, 24))
+
+    def test_length_adjustment_reports_missed_target_without_trusting_model(self):
+        request = ParagraphRevisionRequest.model_validate(
+            request_payload(
+                action="adjust_paragraph_length",
+                targetWordCount=20,
+                paragraph={"paragraphId": "p-1", "text": length_adjustment_text()},
+            )
+        )
+        suggestion = ParagraphRevisionSuggestion(
+            revisedText=length_adjustment_text(),
+            summary="Keeps the paragraph mostly unchanged.",
+        )
+        service = ParagraphRevisionService(
+            settings=AppSettings(openai_api_key="sk-test", openai_model="gpt-custom"),
+            client=OpenAIResponsesParagraphRevisionClient(
+                settings=AppSettings(openai_api_key="sk-test", openai_model="gpt-custom"),
+                raw_client=FakeOpenAIClient(suggestion),
+            ),
+        )
+
+        response = service.suggest_revision(request)
+
+        self.assertIsNotNone(response.length)
+        self.assertFalse(response.length.withinTolerance)
+
+    def test_extreme_length_target_is_rejected_before_model_call(self):
+        request = ParagraphRevisionRequest.model_validate(
+            request_payload(
+                action="adjust_paragraph_length",
+                targetWordCount=500,
+                paragraph={"paragraphId": "p-1", "text": length_adjustment_text()},
+            )
+        )
+        fake_raw_client = FakeOpenAIClient(valid_suggestion())
+        service = ParagraphRevisionService(
+            settings=AppSettings(openai_api_key="sk-test", openai_model="gpt-custom"),
+            client=OpenAIResponsesParagraphRevisionClient(
+                settings=AppSettings(openai_api_key="sk-test", openai_model="gpt-custom"),
+                raw_client=fake_raw_client,
+            ),
+        )
+
+        with self.assertRaises(ParagraphRevisionTargetError):
+            service.suggest_revision(request)
+
+        self.assertEqual(fake_raw_client.responses.calls, [])
+
+    def test_length_target_policy_bounds_and_tolerance_are_centralized(self):
+        minimum, maximum = length_target_bounds(80)
+
+        self.assertEqual(minimum, 40)
+        self.assertEqual(maximum, 140)
+        self.assertEqual(LENGTH_TARGET_TOLERANCE_MIN_WORDS, 6)
+        self.assertTrue(is_within_length_target_tolerance(116, 120))
+        self.assertTrue(is_within_length_target_tolerance(126, 120))
+        self.assertFalse(is_within_length_target_tolerance(130, 120))
 
     def test_valid_structured_revision_validates(self):
         suggestion = ParagraphRevisionSuggestion.model_validate(valid_suggestion().model_dump())
@@ -220,6 +366,16 @@ class ParagraphRevisionGuardrailTests(unittest.TestCase):
     def test_changed_quoted_text_is_rejected(self):
         with self.assertRaises(ParagraphRevisionGuardrailError):
             validate_revision_guardrails('The participant said "I felt observed".', 'The participant said "I felt tracked".')
+
+    def test_length_shortening_keeps_existing_protected_tokens(self):
+        original = 'In 2024, "privacy fatigue" affected 42% of users [1, 5] according to DOI 10.1145/1234567.'
+        revised = 'In 2024, "privacy fatigue" affected 42% of users [1, 5], DOI 10.1145/1234567.'
+
+        validate_revision_guardrails(original, revised)
+
+    def test_lengthening_cannot_introduce_citation(self):
+        with self.assertRaises(ParagraphRevisionGuardrailError):
+            validate_revision_guardrails("The result shaped the argument.", "The result shaped the argument [99].")
 
 
 if __name__ == "__main__":

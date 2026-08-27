@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
-import { createWordDiff } from "../ai/revisionDiff";
+import { useEffect, useState } from "react";
 import { useParagraphAIAnalysis } from "../ai/useParagraphAIAnalysis";
 import { useParagraphRevisionSuggestion } from "../ai/useParagraphRevisionSuggestion";
+import { RevisionSuggestionCard, REVISION_ACTION_LABELS } from "./RevisionSuggestionCard";
 import type {
   AcademicToneLevel,
   CoherenceLevel,
@@ -24,9 +24,9 @@ interface AiWritingPanelProps {
 }
 
 const REVISION_ACTIONS: Array<{ action: ParagraphRevisionAction; label: string }> = [
-  { action: "improve_clarity", label: "Improve clarity" },
-  { action: "improve_academic_tone", label: "Improve academic tone" },
-  { action: "improve_transition", label: "Improve transition" },
+  { action: "improve_clarity", label: REVISION_ACTION_LABELS.improve_clarity },
+  { action: "improve_academic_tone", label: REVISION_ACTION_LABELS.improve_academic_tone },
+  { action: "improve_transition", label: REVISION_ACTION_LABELS.improve_transition },
 ];
 
 export function AiWritingPanel({
@@ -242,49 +242,6 @@ function RevisionActionsSection({
   );
 }
 
-function RevisionSuggestionCard({
-  originalText,
-  suggestion,
-  onReject,
-  onAccept,
-}: {
-  originalText: string;
-  suggestion: SuggestRevisionResponse;
-  onReject: () => void;
-  onAccept: () => void;
-}) {
-  return (
-    <div className="revision-suggestion-card">
-      <p className="revision-action-label">{formatRevisionActionLabel(suggestion.action)}</p>
-      <RevisionDiffPreview originalText={originalText} revisedText={suggestion.suggestion.revisedText} />
-      <p className="revision-summary">{suggestion.suggestion.summary}</p>
-      <div className="revision-decision-row">
-        <button className="revision-decision-button secondary" type="button" onClick={onReject}>
-          Reject
-        </button>
-        <button className="revision-decision-button primary" type="button" onClick={onAccept}>
-          Accept
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function RevisionDiffPreview({ originalText, revisedText }: { originalText: string; revisedText: string }) {
-  const segments = useMemo(() => createWordDiff(originalText, revisedText), [originalText, revisedText]);
-
-  return (
-    <p className="revision-diff-preview" aria-label="Word-level preview of the proposed revision">
-      {segments.map((segment, index) => (
-        <span key={`${segment.kind}-${index}`} className={`revision-diff-segment ${segment.kind}`}>
-          {segment.text}
-          {index < segments.length - 1 ? " " : ""}
-        </span>
-      ))}
-    </p>
-  );
-}
-
 function AiResultSection({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="ai-result-section">
@@ -314,10 +271,6 @@ function formatAssessmentLabel(label: CoherenceLevel | AcademicToneLevel): strin
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
-}
-
-function formatRevisionActionLabel(action: ParagraphRevisionAction): string {
-  return REVISION_ACTIONS.find((item) => item.action === action)?.label ?? "Revision suggestion";
 }
 
 function messageForApplyResult(result: Exclude<ParagraphRevisionApplyResult, { applied: true }>): string {

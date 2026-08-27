@@ -347,6 +347,87 @@ button:disabled {
   height: 10px;
 }
 
+.paragraph-length-current-row,
+.paragraph-target-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.paragraph-length-current-row {
+  margin-bottom: 0.5rem;
+}
+
+.paragraph-length-current-row span,
+.paragraph-target-header label {
+  color: #64717f;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.paragraph-length-current-row strong,
+.paragraph-target-header strong {
+  color: #202124;
+  font-size: 0.9rem;
+}
+
+.paragraph-target-control {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.7rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid #edf0f3;
+}
+
+.paragraph-target-control input[type="range"] {
+  width: 100%;
+  accent-color: #2f6f8f;
+}
+
+.paragraph-target-range {
+  display: flex;
+  justify-content: space-between;
+  color: #7b8590;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.paragraph-target-generate {
+  width: 100%;
+  margin-top: 0.15rem;
+  padding: 0.42rem 0.5rem;
+  border: 1px solid #2f6f8f;
+  border-radius: 6px;
+  background: #2f6f8f;
+  color: #ffffff;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.paragraph-target-generate:hover {
+  background: #255a74;
+}
+
+.paragraph-target-generate:focus-visible {
+  outline: 2px solid #8eb4c4;
+  outline-offset: 2px;
+}
+
+.paragraph-length-revision-preview {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.7rem;
+}
+
+.paragraph-length-revision-preview h4 {
+  margin: 0;
+  color: #303640;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .paragraph-overview-toggle {
   width: 100%;
   display: flex;
@@ -694,6 +775,36 @@ button.document-structure-item:hover,
 .revision-action-label {
   color: #303640;
   font-weight: 700;
+}
+
+.revision-length-facts {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0.5rem 0.55rem;
+  border: 1px solid #e1e7ec;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.revision-length-facts div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.revision-length-facts dt,
+.revision-length-facts dd {
+  margin: 0;
+  color: #66717e;
+  font-size: 0.74rem;
+  line-height: 1.25;
+}
+
+.revision-length-facts dd {
+  color: #303640;
+  font-weight: 700;
+  text-align: right;
 }
 
 .revision-diff-preview {

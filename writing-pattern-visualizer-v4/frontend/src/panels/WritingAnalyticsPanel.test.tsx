@@ -1,7 +1,9 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { suggestRevision } from "../api/aiAnalysis";
 import { WritingAnalyticsPanel } from "./WritingAnalyticsPanel";
+import type { SuggestRevisionRequest, SuggestRevisionResponse } from "../types/aiAnalysis";
 import type {
   ActiveAnalyticsHighlight,
   AnalyticsHighlightRequest,
@@ -9,6 +11,20 @@ import type {
   DocumentAnalyticsResponse,
 } from "../types/backendAnalytics";
 import type { DocumentModel, ParagraphBlock } from "../types/document";
+import type { ParagraphRevisionApplyResult } from "../editor/revision";
+
+vi.mock("../api/aiAnalysis", () => ({
+  suggestRevision: vi.fn(),
+}));
+
+const mockedSuggestRevision = vi.mocked(suggestRevision);
+
+async function flushPromises() {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
 
 function paragraph(id: string, text: string, order: number, overrides: Partial<ParagraphBlock> = {}): ParagraphBlock {
   return {
@@ -34,6 +50,15 @@ const TEST_DOCUMENT = documentWithParagraphs([
   paragraph("p-stable-1", "One two three.", 0),
   paragraph("p-stable-2", "One two three four five.", 1),
   paragraph("p-stable-3", "One two.", 2),
+]);
+
+function generatedWords(prefix: string, count: number): string {
+  return Array.from({ length: count }, (_, index) => `${prefix}${index + 1}`).join(" ");
+}
+
+const LONG_DOCUMENT = documentWithParagraphs([
+  paragraph("p-long-1", generatedWords("alpha", 80), 0),
+  paragraph("p-long-2", generatedWords("beta", 40), 1),
 ]);
 
 const ADDITION_OCCURRENCES = [
@@ -146,6 +171,7 @@ function renderPanel({
   activeAnalyticsHighlight,
   onToggleAnalyticsHighlight,
   onClearAnalyticsHighlights,
+  onAcceptRevision,
 }: {
   document?: DocumentModel;
   revision?: number;
@@ -157,6 +183,7 @@ function renderPanel({
   activeAnalyticsHighlight?: ActiveAnalyticsHighlight | null;
   onToggleAnalyticsHighlight?: (request: AnalyticsHighlightRequest) => void;
   onClearAnalyticsHighlights?: () => void;
+  onAcceptRevision?: (suggestion: SuggestRevisionResponse) => ParagraphRevisionApplyResult;
 } = {}) {
   return render(
     <WritingAnalyticsPanel
@@ -166,6 +193,7 @@ function renderPanel({
       selectedParagraph={selectedParagraph}
       selectedParagraphId={selectedParagraphId}
       activeAnalyticsHighlight={activeAnalyticsHighlight}
+      onAcceptRevision={onAcceptRevision}
       onNavigateToParagraph={onNavigateToParagraph}
       onNavigateToHeading={onNavigateToHeading}
       onToggleAnalyticsHighlight={onToggleAnalyticsHighlight}
@@ -174,13 +202,51 @@ function renderPanel({
   );
 }
 
+function revisionResponseFor(request: SuggestRevisionRequest): SuggestRevisionResponse {
+  const revisedText = request.targetWordCount
+    ? generatedWords("revised", request.targetWordCount + 2)
+    : "Revised paragraph text.";
+
+  return {
+    documentId: request.documentId,
+    sourceRevision: request.revision,
+    requestId: request.requestId,
+    paragraphId: request.paragraph.paragraphId,
+    sourceContentHash: request.sourceContentHash,
+    action: request.action,
+    model: "gpt-5.6-luna",
+    revisionVersion: "paragraph-revision-v1",
+    suggestion: {
+      revisedText,
+      summary: "Adjusts the paragraph length while preserving the stated meaning.",
+    },
+    length:
+      request.action === "adjust_paragraph_length" && request.targetWordCount
+        ? {
+            originalWordCount: request.paragraph.text.split(/\s+/).filter(Boolean).length,
+            targetWordCount: request.targetWordCount,
+            revisedWordCount: request.targetWordCount + 2,
+            withinTolerance: true,
+          }
+        : null,
+  };
+}
+
 describe("WritingAnalyticsPanel paragraph length focus", () => {
+  beforeEach(() => {
+    mockedSuggestRevision.mockImplementation(async (request) => revisionResponseFor(request));
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("shows the selected prose paragraph first and keeps all paragraphs collapsed by default", () => {
     const { container } = renderPanel();
 
     const paragraphLengthSection = screen.getByLabelText("Paragraph length");
     expect(within(paragraphLengthSection).getByText("Selected paragraph · P2")).toBeInTheDocument();
-    expect(within(paragraphLengthSection).getByText("5 words")).toBeInTheDocument();
+    expect(currentWordCountElement(paragraphLengthSection)).toHaveTextContent("5 words");
     expect(within(paragraphLengthSection).getByRole("button", { name: "All paragraphs (3)" })).toHaveAttribute(
       "aria-expanded",
       "false",
@@ -205,14 +271,14 @@ describe("WritingAnalyticsPanel paragraph length focus", () => {
     );
 
     expect(screen.getByText("Selected paragraph · P3")).toBeInTheDocument();
-    expect(screen.getByText("2 words")).toBeInTheDocument();
+    expect(currentWordCountElement(screen.getByLabelText("Paragraph length"))).toHaveTextContent("2 words");
     expect(screen.queryByText("Selected paragraph · P2")).not.toBeInTheDocument();
   });
 
   it("updates the selected paragraph word count when the document changes", () => {
     const { rerender } = renderPanel();
 
-    expect(screen.getByText("5 words")).toBeInTheDocument();
+    expect(currentWordCountElement(screen.getByLabelText("Paragraph length"))).toHaveTextContent("5 words");
 
     const editedDocument = documentWithParagraphs([
       TEST_DOCUMENT.paragraphs[0],
@@ -235,7 +301,7 @@ describe("WritingAnalyticsPanel paragraph length focus", () => {
       />,
     );
 
-    expect(screen.getByText("7 words")).toBeInTheDocument();
+    expect(currentWordCountElement(screen.getByLabelText("Paragraph length"))).toHaveTextContent("7 words");
   });
 
   it("shows a neutral empty state when the selected block is not a valid prose paragraph", () => {
@@ -480,4 +546,190 @@ describe("WritingAnalyticsPanel paragraph length focus", () => {
     expect(within(structure).getByText("1 Introduction")).toBeInTheDocument();
     expect(within(structure).queryByRole("button", { name: "1 Introduction" })).not.toBeInTheDocument();
   });
+
+  it("defaults the paragraph-length target to the selected paragraph word count", () => {
+    renderPanel({
+      document: LONG_DOCUMENT,
+      selectedParagraph: LONG_DOCUMENT.paragraphs[0],
+      selectedParagraphId: "p-long-1",
+      backendAnalytics: backendState({ data: { ...BACKEND_RESPONSE, revision: LONG_DOCUMENT.revision } }),
+    });
+
+    const paragraphLengthSection = screen.getByLabelText("Paragraph length");
+    const targetSlider = within(paragraphLengthSection).getByRole("slider", { name: "Target length in words" });
+
+    expect(within(paragraphLengthSection).getByText("Selected paragraph · P1")).toBeInTheDocument();
+    expect(targetSlider).toHaveValue("80");
+    expect(targetSlider).toHaveAttribute("min", "40");
+    expect(targetSlider).toHaveAttribute("max", "140");
+    expect(within(paragraphLengthSection).getByRole("button", { name: "Generate revision" })).toBeDisabled();
+  });
+
+  it("resets the paragraph-length target when the selected paragraph changes", () => {
+    const { rerender } = renderPanel({
+      document: LONG_DOCUMENT,
+      selectedParagraph: LONG_DOCUMENT.paragraphs[0],
+      selectedParagraphId: "p-long-1",
+      backendAnalytics: backendState({ data: { ...BACKEND_RESPONSE, revision: LONG_DOCUMENT.revision } }),
+    });
+
+    const firstSlider = screen.getByRole("slider", { name: "Target length in words" });
+    fireEvent.change(firstSlider, { target: { value: "60" } });
+    expect(firstSlider).toHaveValue("60");
+
+    rerender(
+      <WritingAnalyticsPanel
+        document={LONG_DOCUMENT}
+        backendAnalytics={backendState({ data: { ...BACKEND_RESPONSE, revision: LONG_DOCUMENT.revision } })}
+        revision={LONG_DOCUMENT.revision}
+        selectedParagraph={LONG_DOCUMENT.paragraphs[1]}
+        selectedParagraphId="p-long-2"
+      />,
+    );
+
+    expect(screen.getByRole("slider", { name: "Target length in words" })).toHaveValue("40");
+  });
+
+  it("resets the paragraph-length target to the actual count after the paragraph content changes", () => {
+    const { rerender } = renderPanel({
+      document: LONG_DOCUMENT,
+      selectedParagraph: LONG_DOCUMENT.paragraphs[0],
+      selectedParagraphId: "p-long-1",
+      backendAnalytics: backendState({ data: { ...BACKEND_RESPONSE, revision: LONG_DOCUMENT.revision } }),
+    });
+
+    const slider = screen.getByRole("slider", { name: "Target length in words" });
+    fireEvent.change(slider, { target: { value: "60" } });
+    expect(slider).toHaveValue("60");
+
+    const acceptedDocument = documentWithParagraphs([
+      paragraph("p-long-1", generatedWords("accepted", 62), 0),
+      LONG_DOCUMENT.paragraphs[1],
+    ]);
+
+    rerender(
+      <WritingAnalyticsPanel
+        document={acceptedDocument}
+        backendAnalytics={backendState({ data: { ...BACKEND_RESPONSE, revision: acceptedDocument.revision } })}
+        revision={acceptedDocument.revision}
+        selectedParagraph={acceptedDocument.paragraphs[0]}
+        selectedParagraphId="p-long-1"
+      />,
+    );
+
+    expect(screen.getByRole("slider", { name: "Target length in words" })).toHaveValue("62");
+  });
+
+  it("sends a shortening request through the existing revision endpoint", async () => {
+    const user = userEvent.setup();
+    renderPanel({
+      document: LONG_DOCUMENT,
+      selectedParagraph: LONG_DOCUMENT.paragraphs[0],
+      selectedParagraphId: "p-long-1",
+      backendAnalytics: backendState({ data: { ...BACKEND_RESPONSE, revision: LONG_DOCUMENT.revision } }),
+    });
+
+    const targetSlider = screen.getByRole("slider", { name: "Target length in words" });
+    fireEvent.change(targetSlider, { target: { value: "60" } });
+    await user.click(screen.getByRole("button", { name: "Generate revision" }));
+
+    expect(mockedSuggestRevision).toHaveBeenCalledTimes(1);
+    expect(mockedSuggestRevision.mock.calls[0][0]).toMatchObject({
+      action: "adjust_paragraph_length",
+      targetWordCount: 60,
+      paragraph: {
+        paragraphId: "p-long-1",
+      },
+    });
+  });
+
+  it("sends a moderate lengthening request through the existing revision endpoint", async () => {
+    const user = userEvent.setup();
+    renderPanel({
+      document: LONG_DOCUMENT,
+      selectedParagraph: LONG_DOCUMENT.paragraphs[0],
+      selectedParagraphId: "p-long-1",
+      backendAnalytics: backendState({ data: { ...BACKEND_RESPONSE, revision: LONG_DOCUMENT.revision } }),
+    });
+
+    fireEvent.change(screen.getByRole("slider", { name: "Target length in words" }), { target: { value: "100" } });
+    await user.click(screen.getByRole("button", { name: "Generate revision" }));
+
+    expect(mockedSuggestRevision.mock.calls[0][0].action).toBe("adjust_paragraph_length");
+    expect(mockedSuggestRevision.mock.calls[0][0].targetWordCount).toBe(100);
+  });
+
+  it("does not submit an invalid paragraph-length target", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    expect(screen.getByText("Length adjustment is available for paragraphs with at least 20 words.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Generate revision" }));
+    expect(mockedSuggestRevision).not.toHaveBeenCalled();
+  });
+
+  it("renders the shared revision preview with current target and suggested counts", async () => {
+    const user = userEvent.setup();
+    renderPanel({
+      document: LONG_DOCUMENT,
+      selectedParagraph: LONG_DOCUMENT.paragraphs[0],
+      selectedParagraphId: "p-long-1",
+      backendAnalytics: backendState({ data: { ...BACKEND_RESPONSE, revision: LONG_DOCUMENT.revision } }),
+    });
+
+    fireEvent.change(screen.getByRole("slider", { name: "Target length in words" }), { target: { value: "60" } });
+    await user.click(screen.getByRole("button", { name: "Generate revision" }));
+    await flushPromises();
+
+    expect(screen.getByText("Revision Suggestion")).toBeInTheDocument();
+    expect(screen.getByText("Adjust paragraph length")).toBeInTheDocument();
+    const lengthFacts = screen.getByLabelText("Length revision word counts");
+    expect(within(lengthFacts).getByText("Current")).toBeInTheDocument();
+    expect(within(lengthFacts).getByText("80 words")).toBeInTheDocument();
+    expect(within(lengthFacts).getByText("Target")).toBeInTheDocument();
+    expect(within(lengthFacts).getByText("60 words")).toBeInTheDocument();
+    expect(within(lengthFacts).getByText("Suggested")).toBeInTheDocument();
+    expect(within(lengthFacts).getByText("62 words")).toBeInTheDocument();
+  });
+
+  it("accepts a paragraph-length revision through the shared accept callback", async () => {
+    const user = userEvent.setup();
+    const onAcceptRevision = vi.fn<(suggestion: SuggestRevisionResponse) => { applied: true }>(() => ({
+      applied: true,
+    }));
+    renderPanel({
+      document: LONG_DOCUMENT,
+      selectedParagraph: LONG_DOCUMENT.paragraphs[0],
+      selectedParagraphId: "p-long-1",
+      backendAnalytics: backendState({ data: { ...BACKEND_RESPONSE, revision: LONG_DOCUMENT.revision } }),
+      onAcceptRevision,
+    });
+
+    fireEvent.change(screen.getByRole("slider", { name: "Target length in words" }), { target: { value: "60" } });
+    await user.click(screen.getByRole("button", { name: "Generate revision" }));
+    await flushPromises();
+    await user.click(screen.getByRole("button", { name: "Accept" }));
+
+    expect(onAcceptRevision).toHaveBeenCalledTimes(1);
+    expect(onAcceptRevision.mock.calls[0][0]).toMatchObject({
+      paragraphId: "p-long-1",
+      action: "adjust_paragraph_length",
+      length: {
+        targetWordCount: 60,
+      },
+    });
+    expect(screen.queryByText("Revision Suggestion")).not.toBeInTheDocument();
+  });
 });
+
+function currentWordCountElement(section: HTMLElement): HTMLElement {
+  const row = section.querySelector(".paragraph-length-current-row");
+  if (!(row instanceof HTMLElement)) {
+    throw new Error("Missing current paragraph length row.");
+  }
+  const value = row.querySelector("strong");
+  if (!(value instanceof HTMLElement)) {
+    throw new Error("Missing current paragraph length value.");
+  }
+  return value;
+}

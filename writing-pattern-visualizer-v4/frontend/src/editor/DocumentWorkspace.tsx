@@ -239,6 +239,7 @@ export function DocumentWorkspace({
             selectedParagraph={selectedParagraph}
             selectedParagraphId={selection.paragraphId}
             activeAnalyticsHighlight={activeAnalyticsHighlight}
+            onAcceptRevision={acceptParagraphRevision}
             onNavigateToParagraph={(paragraphId) => navigateToDocumentNode(paragraphId, "paragraph")}
             onNavigateToHeading={(headingId) => navigateToDocumentNode(headingId, "heading")}
             onToggleAnalyticsHighlight={toggleAnalyticsHighlight}

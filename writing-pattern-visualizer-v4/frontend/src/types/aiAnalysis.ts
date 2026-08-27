@@ -87,7 +87,11 @@ export interface ParagraphAIRequestIdentity {
   cacheKey: string;
 }
 
-export type ParagraphRevisionAction = "improve_clarity" | "improve_academic_tone" | "improve_transition";
+export type ParagraphRevisionAction =
+  | "improve_clarity"
+  | "improve_academic_tone"
+  | "improve_transition"
+  | "adjust_paragraph_length";
 
 export interface SuggestRevisionRequest {
   documentId: string;
@@ -96,6 +100,7 @@ export interface SuggestRevisionRequest {
   language: AnalyticsLanguage;
   action: ParagraphRevisionAction;
   sourceContentHash: string;
+  targetWordCount?: number;
   paragraph: {
     paragraphId: string;
     text: string;
@@ -112,6 +117,13 @@ export interface ParagraphRevisionSuggestion {
   summary: string;
 }
 
+export interface LengthAdjustmentMetadata {
+  originalWordCount: number;
+  targetWordCount: number;
+  revisedWordCount: number;
+  withinTolerance: boolean;
+}
+
 export interface SuggestRevisionResponse {
   documentId: string;
   sourceRevision: number;
@@ -122,6 +134,7 @@ export interface SuggestRevisionResponse {
   model: string;
   revisionVersion: string;
   suggestion: ParagraphRevisionSuggestion;
+  length?: LengthAdjustmentMetadata | null;
 }
 
 export interface ParagraphRevisionRequestIdentity {
@@ -131,4 +144,5 @@ export interface ParagraphRevisionRequestIdentity {
   paragraphId: string;
   sourceContentHash: string;
   action: ParagraphRevisionAction;
+  targetWordCount?: number;
 }

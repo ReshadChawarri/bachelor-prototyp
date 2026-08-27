@@ -7,7 +7,7 @@ import re
 import time
 from typing import Literal, Protocol
 
-from pydantic import Field, ValidationError, field_validator
+from pydantic import Field, ValidationError, field_validator, model_validator
 
 from .config import AppSettings, get_settings
 from .paragraph_ai_analysis import (
@@ -32,13 +32,24 @@ from .paragraph_ai_analysis import (
 logger = logging.getLogger(__name__)
 
 PARAGRAPH_REVISION_VERSION = "paragraph-revision-v1"
+MIN_LENGTH_ADJUSTMENT_WORDS = 20
+MIN_LENGTH_ADJUSTMENT_RATIO = 0.5
+MAX_LENGTH_ADJUSTMENT_RATIO = 1.75
+LENGTH_TARGET_TOLERANCE_PERCENT = 0.05
+LENGTH_TARGET_TOLERANCE_MIN_WORDS = 6
 
-ParagraphRevisionAction = Literal["improve_clarity", "improve_academic_tone", "improve_transition"]
+ParagraphRevisionAction = Literal[
+    "improve_clarity",
+    "improve_academic_tone",
+    "improve_transition",
+    "adjust_paragraph_length",
+]
 
 ACTION_LABELS: dict[str, str] = {
     "improve_clarity": "Improve clarity",
     "improve_academic_tone": "Improve academic tone",
     "improve_transition": "Improve transition / coherence",
+    "adjust_paragraph_length": "Adjust paragraph length",
 }
 
 ACTION_INSTRUCTIONS: dict[str, str] = {
@@ -55,6 +66,14 @@ and do not strengthen claims beyond the original.
     "improve_transition": """
 Improve transitions and coherence within the target paragraph and, where directly supported, its connection to
 the supplied context. Do not invent argumentative relationships, add evidence, or rewrite neighboring paragraphs.
+""".strip(),
+    "adjust_paragraph_length": """
+Adjust the target paragraph toward the requested word count while preserving its substantive meaning.
+The target is approximate, not a command to damage grammar or remove essential content.
+If shortening, tighten redundant wording and overlapping phrasing while preserving evidence, citations, qualifiers,
+numbers, and factual claims.
+If lengthening, clarify existing ideas and make supported relationships more explicit. Do not invent examples,
+evidence, citations, statistics, arguments, results, or factual details to reach the target.
 """.strip(),
 }
 
@@ -96,8 +115,17 @@ class ParagraphRevisionRequest(StrictModel):
     language: Language = "English"
     action: ParagraphRevisionAction
     sourceContentHash: str = Field(min_length=1)
+    targetWordCount: int | None = Field(default=None, ge=1)
     paragraph: SelectedParagraph
     context: ParagraphContext = Field(default_factory=ParagraphContext)
+
+    @model_validator(mode="after")
+    def validate_target_for_action(self) -> "ParagraphRevisionRequest":
+        if self.action == "adjust_paragraph_length" and self.targetWordCount is None:
+            raise ValueError("targetWordCount is required for paragraph length adjustment.")
+        if self.action != "adjust_paragraph_length" and self.targetWordCount is not None:
+            raise ValueError("targetWordCount is only supported for paragraph length adjustment.")
+        return self
 
 
 class ParagraphRevisionSuggestion(StrictModel):
@@ -112,6 +140,13 @@ class ParagraphRevisionSuggestion(StrictModel):
         return value.strip()
 
 
+class LengthAdjustmentMetadata(StrictModel):
+    originalWordCount: int = Field(ge=0)
+    targetWordCount: int = Field(ge=1)
+    revisedWordCount: int = Field(ge=0)
+    withinTolerance: bool
+
+
 class ParagraphRevisionResponse(StrictModel):
     documentId: str
     sourceRevision: int
@@ -122,6 +157,7 @@ class ParagraphRevisionResponse(StrictModel):
     model: str
     revisionVersion: str
     suggestion: ParagraphRevisionSuggestion
+    length: LengthAdjustmentMetadata | None = None
 
 
 @dataclass(frozen=True)
@@ -137,6 +173,11 @@ class ParagraphRevisionClient(Protocol):
 
 class ParagraphRevisionGuardrailError(ParagraphAIAnalysisError):
     user_message = "The suggested revision could not be safely validated. No changes were made."
+    status_code = 422
+
+
+class ParagraphRevisionTargetError(ParagraphAIAnalysisError):
+    user_message = "The requested target length is outside the supported range for this paragraph."
     status_code = 422
 
 
@@ -213,6 +254,11 @@ class ParagraphRevisionService:
 
     def suggest_revision(self, request: ParagraphRevisionRequest) -> ParagraphRevisionResponse:
         ensure_analyzable_text(request.paragraph.text)
+        length_metadata: LengthAdjustmentMetadata | None = None
+        original_word_count = count_revision_words(request.paragraph.text)
+        if request.action == "adjust_paragraph_length":
+            ensure_supported_length_target(original_word_count, request.targetWordCount)
+
         logger.info(
             "paragraph_revision_started paragraph_id=%s action=%s model=%s revision=%s",
             request.paragraph.paragraphId,
@@ -222,6 +268,17 @@ class ParagraphRevisionService:
         )
         suggestion = self.client.suggest_revision(request, self.settings.openai_model)
         validate_revision_guardrails(request.paragraph.text, suggestion.revisedText)
+        if request.action == "adjust_paragraph_length":
+            revised_word_count = count_revision_words(suggestion.revisedText)
+            target_word_count = request.targetWordCount
+            if target_word_count is None:
+                raise ParagraphRevisionTargetError("Missing target word count.")
+            length_metadata = LengthAdjustmentMetadata(
+                originalWordCount=original_word_count,
+                targetWordCount=target_word_count,
+                revisedWordCount=revised_word_count,
+                withinTolerance=is_within_length_target_tolerance(revised_word_count, target_word_count),
+            )
         return ParagraphRevisionResponse(
             documentId=request.documentId,
             sourceRevision=request.revision,
@@ -232,6 +289,7 @@ class ParagraphRevisionService:
             model=self.settings.openai_model,
             revisionVersion=PARAGRAPH_REVISION_VERSION,
             suggestion=suggestion,
+            length=length_metadata,
         )
 
 
@@ -243,6 +301,7 @@ def build_paragraph_revision_prompt(request: ParagraphRevisionRequest) -> Revisi
 
     action_instruction = ACTION_INSTRUCTIONS[request.action]
     action_label = ACTION_LABELS[request.action]
+    length_instruction = build_length_adjustment_prompt_fragment(request)
 
     user_message = f"""
 DOCUMENT LANGUAGE
@@ -256,6 +315,9 @@ REQUESTED ACTION
 
 ACTION-SPECIFIC INSTRUCTIONS
 {action_instruction}
+
+LENGTH TARGET
+{length_instruction}
 
 NEAREST HEADING (CONTEXT ONLY)
 {request.context.nearestHeading or "[none supplied]"}
@@ -291,6 +353,59 @@ def validate_revision_guardrails(original_text: str, revised_text: str) -> None:
         revised = protected_counter(pattern, revised_text)
         if original != revised:
             raise ParagraphRevisionGuardrailError(f"Protected {label} changed.")
+
+
+def count_revision_words(text: str) -> int:
+    return len(re.findall(r"[\w]+(?:[-'][\w]+)*", text.strip(), flags=re.UNICODE))
+
+
+def length_target_bounds(original_word_count: int) -> tuple[int, int]:
+    minimum = max(MIN_LENGTH_ADJUSTMENT_WORDS, round(original_word_count * MIN_LENGTH_ADJUSTMENT_RATIO))
+    maximum = max(minimum, round(original_word_count * MAX_LENGTH_ADJUSTMENT_RATIO))
+    return minimum, maximum
+
+
+def ensure_supported_length_target(original_word_count: int, target_word_count: int | None) -> None:
+    if target_word_count is None:
+        raise ParagraphRevisionTargetError("Missing target word count.")
+    if original_word_count < MIN_LENGTH_ADJUSTMENT_WORDS:
+        raise ParagraphRevisionTargetError("Paragraph is too short for length adjustment.")
+    minimum, maximum = length_target_bounds(original_word_count)
+    if target_word_count < minimum or target_word_count > maximum:
+        raise ParagraphRevisionTargetError(
+            f"Target {target_word_count} is outside supported range {minimum}-{maximum}."
+        )
+    if target_word_count == original_word_count:
+        raise ParagraphRevisionTargetError("Target matches the current paragraph length.")
+
+
+def length_tolerance_margin(target_word_count: int) -> int:
+    return max(LENGTH_TARGET_TOLERANCE_MIN_WORDS, round(target_word_count * LENGTH_TARGET_TOLERANCE_PERCENT))
+
+
+def is_within_length_target_tolerance(revised_word_count: int, target_word_count: int) -> bool:
+    margin = length_tolerance_margin(target_word_count)
+    return abs(revised_word_count - target_word_count) <= margin
+
+
+def build_length_adjustment_prompt_fragment(request: ParagraphRevisionRequest) -> str:
+    if request.action != "adjust_paragraph_length":
+        return "[not applicable]"
+
+    original_word_count = count_revision_words(request.paragraph.text)
+    target_word_count = request.targetWordCount or 0
+    direction = "shorten" if target_word_count < original_word_count else "lengthen"
+    margin = length_tolerance_margin(target_word_count)
+    minimum, maximum = length_target_bounds(original_word_count)
+
+    return (
+        f"Original word count: {original_word_count}. "
+        f"Target word count: approximately {target_word_count} words. "
+        f"Acceptable tolerance: plus or minus {margin} words. "
+        f"Requested direction: {direction}. "
+        f"Supported target range for this paragraph: {minimum}-{maximum} words. "
+        "Do not claim exactness; produce the safest revision near the target while preserving meaning."
+    )
 
 
 def protected_counter(pattern: re.Pattern[str], text: str) -> Counter[str]:

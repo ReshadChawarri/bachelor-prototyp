@@ -19,9 +19,13 @@ export interface ParagraphRevisionState {
   activeAction: ParagraphRevisionAction | null;
   message: string | null;
   canRequest: boolean;
-  requestRevision: (action: ParagraphRevisionAction) => void;
+  requestRevision: (action: ParagraphRevisionAction, options?: ParagraphRevisionRequestOptions) => void;
   reject: () => void;
   clear: () => void;
+}
+
+export interface ParagraphRevisionRequestOptions {
+  targetWordCount?: number;
 }
 
 const EMPTY_STATE: Omit<ParagraphRevisionState, "requestRevision" | "reject" | "clear"> = {
@@ -65,7 +69,7 @@ export function useParagraphRevisionSuggestion(
   }, [clear, targetKey]);
 
   const requestRevision = useCallback(
-    (action: ParagraphRevisionAction) => {
+    (action: ParagraphRevisionAction, options: ParagraphRevisionRequestOptions = {}) => {
       if (target.status !== "ready" || state.status === "loading") {
         return;
       }
@@ -82,6 +86,7 @@ export function useParagraphRevisionSuggestion(
         requestId,
         action,
         sourceContentHash,
+        ...(options.targetWordCount !== undefined ? { targetWordCount: options.targetWordCount } : {}),
       };
       const identity: ParagraphRevisionRequestIdentity = {
         documentId: document.documentId,
@@ -90,6 +95,7 @@ export function useParagraphRevisionSuggestion(
         paragraphId: target.paragraphId,
         sourceContentHash,
         action,
+        ...(options.targetWordCount !== undefined ? { targetWordCount: options.targetWordCount } : {}),
       };
 
       latestRequest.current = identity;
@@ -163,7 +169,8 @@ export function shouldAcceptRevisionResponse(
     latest.requestId === response.requestId &&
     latest.paragraphId === response.paragraphId &&
     latest.sourceContentHash === response.sourceContentHash &&
-    latest.action === response.action
+    latest.action === response.action &&
+    latest.targetWordCount === (response.length?.targetWordCount ?? undefined)
   );
 }
 
@@ -177,7 +184,8 @@ function isCurrentRevisionRequest(
     latest.requestId === request.requestId &&
     latest.paragraphId === request.paragraphId &&
     latest.sourceContentHash === request.sourceContentHash &&
-    latest.action === request.action
+    latest.action === request.action &&
+    latest.targetWordCount === request.targetWordCount
   );
 }
 

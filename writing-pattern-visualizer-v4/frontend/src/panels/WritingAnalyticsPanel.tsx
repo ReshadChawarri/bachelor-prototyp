@@ -1,9 +1,17 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { calculateLocalWritingAnalytics } from "../analytics/localAnalytics";
 import type { ParagraphLengthMetric } from "../analytics/localAnalytics";
+import {
+  isMeaningfulParagraphLengthTarget,
+  PARAGRAPH_LENGTH_TARGET_POLICY,
+  paragraphLengthTargetRange,
+} from "../analytics/paragraphLengthTarget";
+import { useParagraphRevisionSuggestion } from "../ai/useParagraphRevisionSuggestion";
+import { RevisionSuggestionCard } from "./RevisionSuggestionCard";
 import type {
   ActiveAnalyticsHighlight,
+  AnalyticsLanguage,
   AnalyticsHighlightRequest,
   BackendAnalyticsState,
   DocumentAnalyticsResponse,
@@ -11,7 +19,9 @@ import type {
   TransitionAnalytics,
   DocumentStructureAnalytics,
 } from "../types/backendAnalytics";
+import type { SuggestRevisionResponse } from "../types/aiAnalysis";
 import type { DocumentModel, ParagraphBlock } from "../types/document";
+import type { ParagraphRevisionApplyResult } from "../editor/revision";
 
 interface WritingAnalyticsPanelProps {
   document: DocumentModel;
@@ -19,7 +29,9 @@ interface WritingAnalyticsPanelProps {
   revision: number;
   selectedParagraph?: ParagraphBlock;
   selectedParagraphId: string | null;
+  language?: AnalyticsLanguage;
   activeAnalyticsHighlight?: ActiveAnalyticsHighlight | null;
+  onAcceptRevision?: (suggestion: SuggestRevisionResponse) => ParagraphRevisionApplyResult;
   onNavigateToParagraph?: (paragraphId: string) => void;
   onNavigateToHeading?: (headingId: string) => void;
   onToggleAnalyticsHighlight?: (request: AnalyticsHighlightRequest) => void;
@@ -32,14 +44,23 @@ export function WritingAnalyticsPanel({
   revision,
   selectedParagraph,
   selectedParagraphId,
+  language = "English",
   activeAnalyticsHighlight,
+  onAcceptRevision,
   onNavigateToParagraph,
   onNavigateToHeading,
   onToggleAnalyticsHighlight,
   onClearAnalyticsHighlights,
 }: WritingAnalyticsPanelProps) {
   const [allParagraphsOpen, setAllParagraphsOpen] = useState(false);
+  const [lengthAcceptMessage, setLengthAcceptMessage] = useState<string | null>(null);
   const analytics = useMemo(() => calculateLocalWritingAnalytics(document), [document]);
+  const paragraphLengthRevisionState = useParagraphRevisionSuggestion(
+    document,
+    selectedParagraph,
+    selectedParagraphId,
+    language,
+  );
   const maxParagraphWords = Math.max(1, ...analytics.paragraphLengths.map((paragraph) => paragraph.wordCount));
   const maxSentenceBucketCount = Math.max(1, ...analytics.sentenceDistribution.map((bucket) => bucket.count));
   const paragraphRows = useMemo(
@@ -53,6 +74,27 @@ export function WritingAnalyticsPanel({
   const selectedParagraphLength = paragraphRows.find((paragraph) => paragraph.isSelected);
   const currentBackendAnalytics =
     backendAnalytics.data?.revision === document.revision ? backendAnalytics.data : null;
+
+  useEffect(() => {
+    setLengthAcceptMessage(null);
+  }, [selectedParagraphId, selectedParagraph?.text]);
+
+  const handleAcceptLengthRevision = (suggestion: SuggestRevisionResponse) => {
+    if (!onAcceptRevision) {
+      setLengthAcceptMessage("The revision cannot be applied in the current editor state.");
+      return;
+    }
+
+    const result = onAcceptRevision(suggestion);
+    if (result.applied) {
+      paragraphLengthRevisionState.clear();
+      setLengthAcceptMessage(null);
+      return;
+    }
+
+    paragraphLengthRevisionState.clear();
+    setLengthAcceptMessage(messageForApplyResult(result));
+  };
 
   return (
     <div className="panel-content">
@@ -95,7 +137,14 @@ export function WritingAnalyticsPanel({
           <p className="analytics-empty">No prose paragraphs are available for paragraph-length analytics.</p>
         ) : (
           <>
-            <SelectedParagraphLengthView paragraph={selectedParagraphLength} maxParagraphWords={maxParagraphWords} />
+            <SelectedParagraphLengthView
+              paragraph={selectedParagraphLength}
+              selectedParagraph={selectedParagraph}
+              maxParagraphWords={maxParagraphWords}
+              revisionState={paragraphLengthRevisionState}
+              acceptMessage={lengthAcceptMessage}
+              onAcceptRevision={handleAcceptLengthRevision}
+            />
 
             <button
               className="paragraph-overview-toggle"
@@ -523,11 +572,25 @@ function CountBarRow({
 
 function SelectedParagraphLengthView({
   paragraph,
+  selectedParagraph,
   maxParagraphWords,
+  revisionState,
+  acceptMessage,
+  onAcceptRevision,
 }: {
   paragraph?: ParagraphLengthMetric;
+  selectedParagraph?: ParagraphBlock;
   maxParagraphWords: number;
+  revisionState: ReturnType<typeof useParagraphRevisionSuggestion>;
+  acceptMessage: string | null;
+  onAcceptRevision: (suggestion: SuggestRevisionResponse) => void;
 }) {
+  const [targetWordCount, setTargetWordCount] = useState(paragraph?.wordCount ?? 0);
+
+  useEffect(() => {
+    setTargetWordCount(paragraph?.wordCount ?? 0);
+  }, [paragraph?.paragraphId, paragraph?.wordCount]);
+
   if (!paragraph) {
     return (
       <div className="selected-paragraph-summary empty">
@@ -537,6 +600,11 @@ function SelectedParagraphLengthView({
     );
   }
 
+  const targetRange = paragraphLengthTargetRange(paragraph.wordCount);
+  const canGenerate =
+    revisionState.canRequest && isMeaningfulParagraphLengthTarget(paragraph.wordCount, targetWordCount);
+  const suggestion = revisionState.suggestion;
+
   return (
     <div
       className="selected-paragraph-summary"
@@ -544,15 +612,84 @@ function SelectedParagraphLengthView({
       title={paragraph.textPreview}
     >
       <p className="selected-paragraph-meta">Selected paragraph · {paragraph.label}</p>
-      <p className="selected-paragraph-word-count">
-        {paragraph.wordCount} {paragraph.wordCount === 1 ? "word" : "words"}
-      </p>
+      <div className="paragraph-length-current-row">
+        <span>Current</span>
+        <strong>
+          {paragraph.wordCount} {paragraph.wordCount === 1 ? "word" : "words"}
+        </strong>
+      </div>
       <div className="analytics-bar-track selected-paragraph-track" aria-hidden="true">
         <span
           className="analytics-bar-fill paragraph-fill"
           style={{ width: barWidthPercent(paragraph.wordCount, maxParagraphWords) }}
         />
       </div>
+
+      {revisionState.status === "success" && suggestion?.action === "adjust_paragraph_length" && selectedParagraph ? (
+        <div className="paragraph-length-revision-preview">
+          <h4>Revision Suggestion</h4>
+          <RevisionSuggestionCard
+            originalText={selectedParagraph.text}
+            suggestion={suggestion}
+            onReject={revisionState.reject}
+            onAccept={() => onAcceptRevision(suggestion)}
+          />
+        </div>
+      ) : (
+        <div className="paragraph-target-control">
+          <div className="paragraph-target-header">
+            <label htmlFor={`target-length-${paragraph.paragraphId}`}>Target length</label>
+            <strong>{targetWordCount} words</strong>
+          </div>
+          <input
+            id={`target-length-${paragraph.paragraphId}`}
+            type="range"
+            min={targetRange.min}
+            max={targetRange.max}
+            step={1}
+            value={targetWordCount}
+            disabled={!targetRange.enabled || revisionState.status === "loading"}
+            aria-label="Target length in words"
+            aria-valuetext={`${targetWordCount} words`}
+            onChange={(event) => {
+              setTargetWordCount(Number(event.currentTarget.value));
+              if (revisionState.suggestion) {
+                revisionState.clear();
+              }
+            }}
+          />
+          <div className="paragraph-target-range">
+            <span>{targetRange.min}</span>
+            <span>{targetRange.max}</span>
+          </div>
+          {!targetRange.enabled && (
+            <p className="analytics-empty">
+              Length adjustment is available for paragraphs with at least{" "}
+              {PARAGRAPH_LENGTH_TARGET_POLICY.minimumAdjustableWords} words.
+            </p>
+          )}
+          {targetRange.enabled && targetWordCount === paragraph.wordCount && (
+            <p className="analytics-empty">Choose a different target length to generate a revision.</p>
+          )}
+          {revisionState.status === "loading" && <p className="analytics-empty">Generating revision...</p>}
+          {revisionState.status === "error" && (
+            <p className="analytics-empty">{revisionState.message || "A revision could not be generated. No changes were made."}</p>
+          )}
+          {acceptMessage && <p className="analytics-empty">{acceptMessage}</p>}
+          <button
+            className="paragraph-target-generate"
+            type="button"
+            disabled={!canGenerate}
+            onClick={() =>
+              revisionState.requestRevision("adjust_paragraph_length", {
+                targetWordCount,
+              })
+            }
+          >
+            Generate revision
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -592,4 +729,14 @@ function barWidthPercent(wordCount: number, maxWords: number): string {
     return "0%";
   }
   return `${Math.max(6, (wordCount / maxWords) * 100)}%`;
+}
+
+function messageForApplyResult(result: Exclude<ParagraphRevisionApplyResult, { applied: true }>): string {
+  if (result.reason === "stale") {
+    return "This paragraph changed after the suggestion was generated. Generate a new revision before applying it.";
+  }
+  if (result.reason === "missing") {
+    return "The target paragraph is no longer available. No changes were made.";
+  }
+  return "The revision could not be applied safely. No changes were made.";
 }
