@@ -20,6 +20,18 @@ from .paragraph_revision import (
     ParagraphRevisionService,
 )
 from .pdf_import import PdfImportError, PdfImportResponse, extract_pdf_content
+from .study import (
+    StudyDataError,
+    StudyEventRequest,
+    StudyEventResponse,
+    StudyTaskConfig,
+    StudyTaskFinishRequest,
+    StudyTaskFinishResponse,
+    StudyTaskStartResponse,
+    finish_study_task,
+    log_study_event,
+    start_study_task,
+)
 
 
 class HealthResponse(BaseModel):
@@ -33,7 +45,7 @@ class HealthResponse(BaseModel):
 app = FastAPI(
     title="Writing Pattern Visualizer V4 API",
     version="0.1.0",
-    description="Phase 2 backend foundation for the V4 writing workspace and editable PDF import.",
+    description="Backend for the V4 writing workspace, deterministic analytics, paragraph AI support, and Study Mode.",
 )
 
 app.add_middleware(
@@ -54,7 +66,7 @@ def health() -> HealthResponse:
     return HealthResponse(
         status="ok",
         service="writing-pattern-visualizer-v4-backend",
-        phase="phase-6a",
+        phase="study-mode-v1.0",
         aiConfigured=settings.ai_configured,
         openaiModel=settings.openai_model,
     )
@@ -100,3 +112,29 @@ def suggest_revision(request: ParagraphRevisionRequest) -> ParagraphRevisionResp
         return service.suggest_revision(request)
     except ParagraphAIAnalysisError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.user_message) from exc
+
+
+@app.post("/api/study/tasks/start", response_model=StudyTaskStartResponse)
+def study_task_start(request: StudyTaskConfig) -> StudyTaskStartResponse:
+    try:
+        return start_study_task(request)
+    except StudyDataError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/study/events", response_model=StudyEventResponse)
+def study_event(request: StudyEventRequest) -> StudyEventResponse:
+    try:
+        return log_study_event(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/study/tasks/finish", response_model=StudyTaskFinishResponse)
+def study_task_finish(request: StudyTaskFinishRequest) -> StudyTaskFinishResponse:
+    try:
+        return finish_study_task(request)
+    except StudyDataError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
