@@ -2,7 +2,12 @@ import type { Editor } from "@tiptap/core";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import type { DocumentModel, ParagraphBlock } from "../types/document";
 
-export function serializeDocument(editor: Editor, title: string, revision: number): DocumentModel {
+export function serializeDocument(
+  editor: Editor,
+  title: string,
+  revision: number,
+  documentId = "local-draft",
+): DocumentModel {
   const paragraphs: ParagraphBlock[] = [];
 
   walkDocument(editor.state.doc, [], (node, ancestors) => {
@@ -27,7 +32,7 @@ export function serializeDocument(editor: Editor, title: string, revision: numbe
   });
 
   return {
-    documentId: "local-draft",
+    documentId,
     revision,
     title,
     paragraphs,

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParagraphAIAnalysis } from "../ai/useParagraphAIAnalysis";
 import { useParagraphRevisionSuggestion } from "../ai/useParagraphRevisionSuggestion";
 import type { ParagraphRevisionState } from "../ai/useParagraphRevisionSuggestion";
@@ -15,6 +15,7 @@ import type {
 import type { AnalyticsLanguage } from "../types/backendAnalytics";
 import type { DocumentModel, ParagraphBlock } from "../types/document";
 import type { ParagraphRevisionApplyResult } from "../editor/revision";
+import type { StudyEventLogger } from "../study/types";
 
 interface AiWritingPanelProps {
   document: DocumentModel;
@@ -23,6 +24,7 @@ interface AiWritingPanelProps {
   language?: AnalyticsLanguage;
   onAcceptRevision?: (suggestion: SuggestRevisionResponse) => ParagraphRevisionApplyResult;
   revisionState?: ParagraphRevisionState;
+  onStudyEvent?: StudyEventLogger;
 }
 
 const REVISION_ACTIONS: Array<{ action: ParagraphRevisionAction; label: string }> = [
@@ -38,15 +40,30 @@ export function AiWritingPanel({
   language = "English",
   onAcceptRevision,
   revisionState: externalRevisionState,
+  onStudyEvent,
 }: AiWritingPanelProps) {
   const paragraphAnalysisState = useParagraphAIAnalysis(document, selectedParagraph, selectedParagraphId, language);
   const localRevisionState = useParagraphRevisionSuggestion(document, selectedParagraph, selectedParagraphId, language);
   const revisionState = externalRevisionState ?? localRevisionState;
   const [acceptMessage, setAcceptMessage] = useState<string | null>(null);
+  const loggedAnalysisKeys = useRef(new Set<string>());
 
   useEffect(() => {
     setAcceptMessage(null);
   }, [selectedParagraphId, selectedParagraph?.text]);
+
+  useEffect(() => {
+    if (paragraphAnalysisState.status === "success" && paragraphAnalysisState.data) {
+      const key = `${paragraphAnalysisState.data.revision}:${paragraphAnalysisState.data.requestId}:${paragraphAnalysisState.data.paragraphId}`;
+      if (loggedAnalysisKeys.current.has(key)) {
+        return;
+      }
+      loggedAnalysisKeys.current.add(key);
+      onStudyEvent?.("ai_analysis_completed", {
+        paragraphId: paragraphAnalysisState.data.paragraphId,
+      });
+    }
+  }, [onStudyEvent, paragraphAnalysisState.data, paragraphAnalysisState.status]);
 
   const handleAcceptRevision = (suggestion: SuggestRevisionResponse) => {
     if (!onAcceptRevision) {
@@ -56,11 +73,20 @@ export function AiWritingPanel({
 
     const result = onAcceptRevision(suggestion);
     if (result.applied) {
+      onStudyEvent?.("revision_accepted", {
+        paragraphId: suggestion.paragraphId,
+        action: suggestion.action,
+      });
       revisionState.clear();
       setAcceptMessage(null);
       return;
     }
 
+    onStudyEvent?.("revision_failed", {
+      paragraphId: suggestion.paragraphId,
+      action: suggestion.action,
+      category: result.reason === "stale" ? "stale" : "unknown",
+    });
     revisionState.clear();
     setAcceptMessage(messageForApplyResult(result));
   };
@@ -79,6 +105,7 @@ export function AiWritingPanel({
         revisionState={revisionState}
         selectedParagraph={selectedParagraph}
         acceptMessage={acceptMessage}
+        onStudyEvent={onStudyEvent}
         onAcceptRevision={handleAcceptRevision}
       />
 
@@ -97,12 +124,14 @@ function ParagraphAIAnalysisPanel({
   revisionState,
   selectedParagraph,
   acceptMessage,
+  onStudyEvent,
   onAcceptRevision,
 }: {
   analysisState: ReturnType<typeof useParagraphAIAnalysis>;
   revisionState: ReturnType<typeof useParagraphRevisionSuggestion>;
   selectedParagraph?: ParagraphBlock;
   acceptMessage: string | null;
+  onStudyEvent?: StudyEventLogger;
   onAcceptRevision: (suggestion: SuggestRevisionResponse) => void;
 }) {
   const canShowActions = analysisState.status === "success" && Boolean(analysisState.data);
@@ -168,6 +197,7 @@ function ParagraphAIAnalysisPanel({
             revisionState={revisionState}
             selectedParagraph={selectedParagraph}
             acceptMessage={acceptMessage}
+            onStudyEvent={onStudyEvent}
             onAcceptRevision={onAcceptRevision}
           />
 
@@ -194,6 +224,7 @@ function ParagraphAIAnalysisPanel({
           revisionState={revisionState}
           selectedParagraph={selectedParagraph}
           acceptMessage={acceptMessage}
+          onStudyEvent={onStudyEvent}
           onAcceptRevision={onAcceptRevision}
         />
       )}
@@ -206,12 +237,14 @@ function RevisionActionsSection({
   revisionState,
   selectedParagraph,
   acceptMessage,
+  onStudyEvent,
   onAcceptRevision,
 }: {
   canShowActions: boolean;
   revisionState: ReturnType<typeof useParagraphRevisionSuggestion>;
   selectedParagraph?: ParagraphBlock;
   acceptMessage: string | null;
+  onStudyEvent?: StudyEventLogger;
   onAcceptRevision: (suggestion: SuggestRevisionResponse) => void;
 }) {
   if (!canShowActions) {
@@ -226,7 +259,13 @@ function RevisionActionsSection({
         <RevisionSuggestionCard
           originalText={selectedParagraph.text}
           suggestion={suggestion}
-          onReject={revisionState.reject}
+          onReject={() => {
+            onStudyEvent?.("revision_rejected", {
+              paragraphId: suggestion.paragraphId,
+              action: suggestion.action,
+            });
+            revisionState.reject();
+          }}
           onAccept={() => onAcceptRevision(suggestion)}
         />
       ) : (
@@ -237,7 +276,15 @@ function RevisionActionsSection({
                 key={item.action}
                 className="revision-action-button"
                 type="button"
-                onClick={() => revisionState.requestRevision(item.action)}
+                onClick={() => {
+                  if (selectedParagraph) {
+                    onStudyEvent?.("revision_requested", {
+                      paragraphId: selectedParagraph.id,
+                      action: item.action,
+                    });
+                  }
+                  revisionState.requestRevision(item.action);
+                }}
                 disabled={!revisionState.canRequest}
               >
                 {item.label}

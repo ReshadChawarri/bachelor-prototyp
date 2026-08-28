@@ -8,7 +8,7 @@ import {
   paragraphLengthTargetRange,
 } from "../analytics/paragraphLengthTarget";
 import { useParagraphRevisionSuggestion } from "../ai/useParagraphRevisionSuggestion";
-import type { ParagraphRevisionState } from "../ai/useParagraphRevisionSuggestion";
+import type { ParagraphRevisionLifecycleCallbacks, ParagraphRevisionState } from "../ai/useParagraphRevisionSuggestion";
 import { RevisionSuggestionCard } from "./RevisionSuggestionCard";
 import type {
   ActiveAnalyticsHighlight,
@@ -23,6 +23,7 @@ import type {
 import type { SuggestRevisionResponse } from "../types/aiAnalysis";
 import type { DocumentModel, ParagraphBlock } from "../types/document";
 import type { ParagraphRevisionApplyResult } from "../editor/revision";
+import type { StudyEventLogger } from "../study/types";
 
 interface WritingAnalyticsPanelProps {
   document: DocumentModel;
@@ -31,8 +32,11 @@ interface WritingAnalyticsPanelProps {
   selectedParagraph?: ParagraphBlock;
   selectedParagraphId: string | null;
   language?: AnalyticsLanguage;
+  aiFeaturesEnabled?: boolean;
   activeAnalyticsHighlight?: ActiveAnalyticsHighlight | null;
   sentenceRevisionState?: ParagraphRevisionState;
+  revisionLifecycleCallbacks?: ParagraphRevisionLifecycleCallbacks;
+  onStudyEvent?: StudyEventLogger;
   onAcceptRevision?: (suggestion: SuggestRevisionResponse) => ParagraphRevisionApplyResult;
   onNavigateToParagraph?: (paragraphId: string) => void;
   onNavigateToHeading?: (headingId: string) => void;
@@ -47,8 +51,11 @@ export function WritingAnalyticsPanel({
   selectedParagraph,
   selectedParagraphId,
   language = "English",
+  aiFeaturesEnabled = true,
   activeAnalyticsHighlight,
   sentenceRevisionState: externalSentenceRevisionState,
+  revisionLifecycleCallbacks,
+  onStudyEvent,
   onAcceptRevision,
   onNavigateToParagraph,
   onNavigateToHeading,
@@ -67,8 +74,17 @@ export function WritingAnalyticsPanel({
     selectedParagraph,
     selectedParagraphId,
     language,
+    aiFeaturesEnabled,
+    revisionLifecycleCallbacks,
   );
-  const localSentenceRevisionState = useParagraphRevisionSuggestion(document, selectedParagraph, selectedParagraphId, language);
+  const localSentenceRevisionState = useParagraphRevisionSuggestion(
+    document,
+    selectedParagraph,
+    selectedParagraphId,
+    language,
+    aiFeaturesEnabled,
+    revisionLifecycleCallbacks,
+  );
   const sentenceRevisionState = externalSentenceRevisionState ?? localSentenceRevisionState;
   const maxParagraphWords = Math.max(1, ...analytics.paragraphLengths.map((paragraph) => paragraph.wordCount));
   const maxSentenceBucketCount = Math.max(1, ...analytics.sentenceDistribution.map((bucket) => bucket.count));
@@ -100,11 +116,20 @@ export function WritingAnalyticsPanel({
 
     const result = onAcceptRevision(suggestion);
     if (result.applied) {
+      onStudyEvent?.("revision_accepted", {
+        paragraphId: suggestion.paragraphId,
+        action: suggestion.action,
+      });
       paragraphLengthRevisionState.clear();
       setLengthAcceptMessage(null);
       return;
     }
 
+    onStudyEvent?.("revision_failed", {
+      paragraphId: suggestion.paragraphId,
+      action: suggestion.action,
+      category: result.reason === "stale" ? "stale" : "unknown",
+    });
     paragraphLengthRevisionState.clear();
     setLengthAcceptMessage(messageForApplyResult(result));
   };
@@ -155,15 +180,24 @@ export function WritingAnalyticsPanel({
               selectedParagraph={selectedParagraph}
               maxParagraphWords={maxParagraphWords}
               revisionState={paragraphLengthRevisionState}
+              aiFeaturesEnabled={aiFeaturesEnabled}
               acceptMessage={lengthAcceptMessage}
               onAcceptRevision={handleAcceptLengthRevision}
+              onStudyEvent={onStudyEvent}
             />
 
             <button
               className="paragraph-overview-toggle"
               type="button"
               aria-expanded={allParagraphsOpen}
-              onClick={() => setAllParagraphsOpen((open) => !open)}
+              onClick={() => {
+                setAllParagraphsOpen((open) => {
+                  if (!open) {
+                    onStudyEvent?.("analytics_section_expanded", { section: "paragraph_length" });
+                  }
+                  return !open;
+                });
+              }}
             >
               <span aria-hidden="true">{allParagraphsOpen ? "▾" : "▸"}</span>
               All paragraphs ({analytics.paragraphLengths.length})
@@ -187,12 +221,24 @@ export function WritingAnalyticsPanel({
 
       <section className="analytics-section" aria-label="Sentence length distribution">
         <h3>Sentence Length</h3>
-        <SelectedSentenceLengthView profile={selectedSentenceProfile} revisionState={sentenceRevisionState} />
+        <SelectedSentenceLengthView
+          profile={selectedSentenceProfile}
+          revisionState={sentenceRevisionState}
+          aiFeaturesEnabled={aiFeaturesEnabled}
+          onStudyEvent={onStudyEvent}
+        />
 
         <DisclosureToggle
           expanded={sentenceDistributionOpen}
           label="Document distribution"
-          onToggle={() => setSentenceDistributionOpen((open) => !open)}
+          onToggle={() =>
+            setSentenceDistributionOpen((open) => {
+              if (!open) {
+                onStudyEvent?.("analytics_section_expanded", { section: "sentence_length" });
+              }
+              return !open;
+            })
+          }
         />
 
         {sentenceDistributionOpen && (
@@ -209,7 +255,14 @@ export function WritingAnalyticsPanel({
         error={backendAnalytics.error}
         activeHighlight={activeAnalyticsHighlight}
         expanded={transitionCategoriesOpen}
-        onToggleExpanded={() => setTransitionCategoriesOpen((open) => !open)}
+        onToggleExpanded={() =>
+          setTransitionCategoriesOpen((open) => {
+            if (!open) {
+              onStudyEvent?.("analytics_section_expanded", { section: "transition_words" });
+            }
+            return !open;
+          })
+        }
         onToggleAnalyticsHighlight={onToggleAnalyticsHighlight}
       />
 
@@ -219,7 +272,14 @@ export function WritingAnalyticsPanel({
         error={backendAnalytics.error}
         activeHighlight={activeAnalyticsHighlight}
         expanded={repetitionTermsOpen}
-        onToggleExpanded={() => setRepetitionTermsOpen((open) => !open)}
+        onToggleExpanded={() =>
+          setRepetitionTermsOpen((open) => {
+            if (!open) {
+              onStudyEvent?.("analytics_section_expanded", { section: "repetition" });
+            }
+            return !open;
+          })
+        }
         onToggleAnalyticsHighlight={onToggleAnalyticsHighlight}
       />
 
@@ -229,7 +289,14 @@ export function WritingAnalyticsPanel({
         error={backendAnalytics.error}
         selectedNodeId={selectedParagraphId}
         expanded={documentStructureOpen}
-        onToggleExpanded={() => setDocumentStructureOpen((open) => !open)}
+        onToggleExpanded={() =>
+          setDocumentStructureOpen((open) => {
+            if (!open) {
+              onStudyEvent?.("analytics_section_expanded", { section: "document_structure" });
+            }
+            return !open;
+          })
+        }
         onNavigateToHeading={onNavigateToHeading}
       />
 
@@ -587,9 +654,13 @@ interface SelectedSentenceProfile {
 function SelectedSentenceLengthView({
   profile,
   revisionState,
+  aiFeaturesEnabled,
+  onStudyEvent,
 }: {
   profile?: SelectedSentenceProfile;
   revisionState: ParagraphRevisionState;
+  aiFeaturesEnabled: boolean;
+  onStudyEvent?: StudyEventLogger;
 }) {
   if (!profile) {
     return (
@@ -629,20 +700,33 @@ function SelectedSentenceLengthView({
           </div>
         ))}
       </div>
-      <button
-        className="paragraph-target-generate"
-        type="button"
-        disabled={!revisionState.canRequest}
-        onClick={() => revisionState.requestRevision("improve_sentence_length")}
-      >
-        Make sentences more concise
-      </button>
-      {isSentenceRevisionLoading && <p className="analytics-empty">Generating revision...</p>}
-      {isSentenceRevisionError && (
-        <p className="analytics-empty">{revisionState.message || "A revision could not be generated. No changes were made."}</p>
-      )}
-      {isSentenceRevisionReady && (
-        <p className="analytics-empty">Revision suggestion is available in AI Writing Analysis.</p>
+      {aiFeaturesEnabled && (
+        <>
+          <button
+            className="paragraph-target-generate"
+            type="button"
+            disabled={!revisionState.canRequest}
+            onClick={() => {
+              onStudyEvent?.("revision_requested", {
+                paragraphId: profile.paragraphId,
+                action: "improve_sentence_length",
+                originalAverageSentenceLength: Number(profile.averageSentenceLength.toFixed(1)),
+                originalVeryLongSentenceCount:
+                  profile.distribution.find((bucket) => bucket.category === "Very long")?.count ?? 0,
+              });
+              revisionState.requestRevision("improve_sentence_length");
+            }}
+          >
+            Make sentences more concise
+          </button>
+          {isSentenceRevisionLoading && <p className="analytics-empty">Generating revision...</p>}
+          {isSentenceRevisionError && (
+            <p className="analytics-empty">{revisionState.message || "A revision could not be generated. No changes were made."}</p>
+          )}
+          {isSentenceRevisionReady && (
+            <p className="analytics-empty">Revision suggestion is available in AI Writing Analysis.</p>
+          )}
+        </>
       )}
     </div>
   );
@@ -772,15 +856,19 @@ function SelectedParagraphLengthView({
   selectedParagraph,
   maxParagraphWords,
   revisionState,
+  aiFeaturesEnabled,
   acceptMessage,
   onAcceptRevision,
+  onStudyEvent,
 }: {
   paragraph?: ParagraphLengthMetric;
   selectedParagraph?: ParagraphBlock;
   maxParagraphWords: number;
   revisionState: ReturnType<typeof useParagraphRevisionSuggestion>;
+  aiFeaturesEnabled: boolean;
   acceptMessage: string | null;
   onAcceptRevision: (suggestion: SuggestRevisionResponse) => void;
+  onStudyEvent?: StudyEventLogger;
 }) {
   const [targetWordCount, setTargetWordCount] = useState(paragraph?.wordCount ?? 0);
 
@@ -822,17 +910,23 @@ function SelectedParagraphLengthView({
         />
       </div>
 
-      {revisionState.status === "success" && suggestion?.action === "adjust_paragraph_length" && selectedParagraph ? (
+      {aiFeaturesEnabled && revisionState.status === "success" && suggestion?.action === "adjust_paragraph_length" && selectedParagraph ? (
         <div className="paragraph-length-revision-preview">
           <h4>Revision Suggestion</h4>
           <RevisionSuggestionCard
             originalText={selectedParagraph.text}
             suggestion={suggestion}
-            onReject={revisionState.reject}
+            onReject={() => {
+              onStudyEvent?.("revision_rejected", {
+                paragraphId: suggestion.paragraphId,
+                action: suggestion.action,
+              });
+              revisionState.reject();
+            }}
             onAccept={() => onAcceptRevision(suggestion)}
           />
         </div>
-      ) : (
+      ) : aiFeaturesEnabled ? (
         <div className="paragraph-target-control">
           <div className="paragraph-target-header">
             <label htmlFor={`target-length-${paragraph.paragraphId}`}>Target length</label>
@@ -877,16 +971,22 @@ function SelectedParagraphLengthView({
             className="paragraph-target-generate"
             type="button"
             disabled={!canGenerate}
-            onClick={() =>
+            onClick={() => {
+              onStudyEvent?.("revision_requested", {
+                paragraphId: paragraph.paragraphId,
+                action: "adjust_paragraph_length",
+                currentWordCount: paragraph.wordCount,
+                targetWordCount,
+              });
               revisionState.requestRevision("adjust_paragraph_length", {
                 targetWordCount,
-              })
-            }
+              });
+            }}
           >
             Generate revision
           </button>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

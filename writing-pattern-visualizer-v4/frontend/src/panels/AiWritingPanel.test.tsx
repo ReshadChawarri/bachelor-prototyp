@@ -9,6 +9,7 @@ import type {
   SuggestRevisionResponse,
 } from "../types/aiAnalysis";
 import type { DocumentModel, ParagraphBlock } from "../types/document";
+import type { StudyEventLogger } from "../study/types";
 import { AiWritingPanel } from "./AiWritingPanel";
 
 vi.mock("../api/aiAnalysis", () => ({
@@ -176,6 +177,45 @@ describe("AiWritingPanel", () => {
     expect(screen.getByText("Clarifies the phrasing while preserving the central meaning.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Accept" })).toBeInTheDocument();
     expect(onAcceptRevision).not.toHaveBeenCalled();
+  });
+
+  it("logs AI analysis completion and revision decisions without model response text", async () => {
+    const onStudyEvent = vi.fn<StudyEventLogger>();
+    const onAcceptRevision = vi.fn(() => ({ applied: true as const }));
+    render(
+      <AiWritingPanel
+        document={DOCUMENT}
+        selectedParagraph={DOCUMENT.paragraphs[1]}
+        selectedParagraphId="p-1"
+        onAcceptRevision={onAcceptRevision}
+        onStudyEvent={onStudyEvent}
+      />,
+    );
+
+    await advanceAIAnalysisDebounce();
+    expect(onStudyEvent).toHaveBeenCalledWith("ai_analysis_completed", { paragraphId: "p-1" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Improve clarity" }));
+    await flushPromises();
+    expect(onStudyEvent).toHaveBeenCalledWith("revision_requested", {
+      paragraphId: "p-1",
+      action: "improve_clarity",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Reject" }));
+    expect(onStudyEvent).toHaveBeenCalledWith("revision_rejected", {
+      paragraphId: "p-1",
+      action: "improve_clarity",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Improve transition" }));
+    await flushPromises();
+    fireEvent.click(screen.getByRole("button", { name: "Accept" }));
+    expect(onStudyEvent).toHaveBeenCalledWith("revision_accepted", {
+      paragraphId: "p-1",
+      action: "improve_transition",
+    });
+    expect(JSON.stringify(onStudyEvent.mock.calls)).not.toContain("The paragraph develops a clear claim");
   });
 
   it("uses the requested revision action", async () => {

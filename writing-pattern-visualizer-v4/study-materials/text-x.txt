@@ -1,0 +1,11 @@
+Text X Placeholder
+
+1 Introduction
+
+This placeholder text represents one of the academic study materials for the evaluation. It is intentionally short so the researcher can replace it with the final Text X without changing the application logic.
+
+The prototype should load this text as a fresh editable document for every study task. Participants may revise the working copy, but the master text file should remain unchanged.
+
+2 Discussion
+
+The final version of Text X should contain the academic content selected for the user study. This placeholder only verifies that headings and prose paragraphs can be loaded into the writing workspace.

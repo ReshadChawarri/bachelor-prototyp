@@ -28,6 +28,16 @@ export interface ParagraphRevisionRequestOptions {
   targetWordCount?: number;
 }
 
+export interface ParagraphRevisionLifecycleCallbacks {
+  onRequestStarted?: (request: SuggestRevisionRequest) => void;
+  onRequestGenerated?: (response: SuggestRevisionResponse, generationLatencyMs: number) => void;
+  onRequestFailed?: (
+    details: Pick<ParagraphRevisionRequestIdentity, "paragraphId" | "action">,
+    error: unknown,
+    generationLatencyMs: number,
+  ) => void;
+}
+
 const EMPTY_STATE: Omit<ParagraphRevisionState, "requestRevision" | "reject" | "clear"> = {
   status: "idle",
   suggestion: null,
@@ -41,6 +51,8 @@ export function useParagraphRevisionSuggestion(
   selectedParagraph: ParagraphBlock | undefined,
   selectedParagraphId: string | null,
   language: AnalyticsLanguage = "English",
+  enabled = true,
+  callbacks: ParagraphRevisionLifecycleCallbacks = {},
 ): ParagraphRevisionState {
   const [state, setState] = useState<Omit<ParagraphRevisionState, "requestRevision" | "reject" | "clear">>(EMPTY_STATE);
   const requestCounter = useRef(0);
@@ -48,11 +60,15 @@ export function useParagraphRevisionSuggestion(
   const activeController = useRef<AbortController | null>(null);
 
   const target = useMemo(
-    () => createParagraphAIAnalysisTarget(document, selectedParagraph, selectedParagraphId, language),
-    [document, language, selectedParagraph, selectedParagraphId],
+    () => (enabled ? createParagraphAIAnalysisTarget(document, selectedParagraph, selectedParagraphId, language) : null),
+    [document, enabled, language, selectedParagraph, selectedParagraphId],
   );
 
-  const targetKey = target.status === "ready" ? target.cacheKey : `${target.status}:${target.paragraphId ?? "none"}`;
+  const targetKey = !target
+    ? "disabled"
+    : target.status === "ready"
+      ? target.cacheKey
+      : `${target.status}:${target.paragraphId ?? "none"}`;
 
   const clear = useCallback(() => {
     latestRequest.current = null;
@@ -60,9 +76,9 @@ export function useParagraphRevisionSuggestion(
     activeController.current = null;
     setState({
       ...EMPTY_STATE,
-      canRequest: target.status === "ready",
+      canRequest: target?.status === "ready",
     });
-  }, [target.status]);
+  }, [target?.status]);
 
   useEffect(() => {
     clear();
@@ -70,13 +86,14 @@ export function useParagraphRevisionSuggestion(
 
   const requestRevision = useCallback(
     (action: ParagraphRevisionAction, options: ParagraphRevisionRequestOptions = {}) => {
-      if (target.status !== "ready" || state.status === "loading") {
+      if (!enabled || target?.status !== "ready" || state.status === "loading") {
         return;
       }
 
       activeController.current?.abort();
       const controller = new AbortController();
       activeController.current = controller;
+      const startedAt = Date.now();
 
       requestCounter.current += 1;
       const requestId = `revision-${document.revision}-${requestCounter.current}`;
@@ -99,6 +116,7 @@ export function useParagraphRevisionSuggestion(
       };
 
       latestRequest.current = identity;
+      callbacks.onRequestStarted?.(request);
       setState({
         status: "loading",
         suggestion: null,
@@ -114,6 +132,7 @@ export function useParagraphRevisionSuggestion(
           }
 
           activeController.current = null;
+          callbacks.onRequestGenerated?.(response, Date.now() - startedAt);
           setState({
             status: "success",
             suggestion: response,
@@ -128,6 +147,14 @@ export function useParagraphRevisionSuggestion(
           }
 
           activeController.current = null;
+          callbacks.onRequestFailed?.(
+            {
+              paragraphId: identity.paragraphId,
+              action: identity.action,
+            },
+            error,
+            Date.now() - startedAt,
+          );
           setState({
             status: "error",
             suggestion: null,
@@ -137,7 +164,7 @@ export function useParagraphRevisionSuggestion(
           });
         });
     },
-    [document.documentId, document.revision, state.status, target],
+    [callbacks, document.documentId, document.revision, enabled, state.status, target],
   );
 
   const reject = useCallback(() => {
@@ -146,13 +173,13 @@ export function useParagraphRevisionSuggestion(
     activeController.current = null;
     setState({
       ...EMPTY_STATE,
-      canRequest: target.status === "ready",
+      canRequest: target?.status === "ready",
     });
-  }, [target.status]);
+  }, [target?.status]);
 
   return {
     ...state,
-    canRequest: target.status === "ready" && state.status !== "loading",
+    canRequest: enabled && target?.status === "ready" && state.status !== "loading",
     requestRevision,
     reject,
     clear,

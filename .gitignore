@@ -50,3 +50,6 @@ Thumbs.db
 # Generated benchmark output
 backend/benchmarks/output/
 **/backend/benchmarks/output/
+
+# Local study data
+writing-pattern-visualizer-v4/backend/study-data/

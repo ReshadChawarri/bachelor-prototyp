@@ -2,6 +2,7 @@ import { EditorContent, useEditor } from "@tiptap/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
 import { clearAnalyticsHighlights, setAnalyticsHighlights } from "./analyticsHighlight";
+import type { ParagraphRevisionLifecycleCallbacks } from "../ai/useParagraphRevisionSuggestion";
 import { useParagraphRevisionSuggestion } from "../ai/useParagraphRevisionSuggestion";
 import { createEditorExtensions } from "./extensions";
 import { importedPdfToTipTapDocument } from "./importedDocument";
@@ -18,6 +19,7 @@ import type {
 } from "../types/backendAnalytics";
 import type { SuggestRevisionResponse } from "../types/aiAnalysis";
 import type { DocumentModel, EditorSelection, ImportRequest, ParagraphBlock } from "../types/document";
+import type { StudyEventLogger } from "../study/types";
 
 interface DocumentWorkspaceProps {
   title: string;
@@ -28,6 +30,9 @@ interface DocumentWorkspaceProps {
   rightPanelOpen: boolean;
   selectedParagraph?: ParagraphBlock;
   selection: EditorSelection;
+  aiFeaturesEnabled?: boolean;
+  revisionLifecycleCallbacks?: ParagraphRevisionLifecycleCallbacks;
+  onStudyEvent?: StudyEventLogger;
   onDocumentChange: (document: DocumentModel) => void;
   onSelectionChange: (selection: EditorSelection) => void;
   onToggleLeftPanel: () => void;
@@ -49,6 +54,9 @@ export function DocumentWorkspace({
   rightPanelOpen,
   selectedParagraph,
   selection,
+  aiFeaturesEnabled = true,
+  revisionLifecycleCallbacks,
+  onStudyEvent,
   onDocumentChange,
   onSelectionChange,
   onToggleLeftPanel,
@@ -59,13 +67,20 @@ export function DocumentWorkspace({
   const highlightedNodeRef = useRef<HTMLElement | null>(null);
   const highlightTimerRef = useRef<number | null>(null);
   const [activeAnalyticsHighlight, setActiveAnalyticsHighlight] = useState<ActiveAnalyticsHighlight | null>(null);
-  const aiPanelRevisionState = useParagraphRevisionSuggestion(document, selectedParagraph, selection.paragraphId);
+  const aiPanelRevisionState = useParagraphRevisionSuggestion(
+    document,
+    selectedParagraph,
+    selection.paragraphId,
+    "English",
+    aiFeaturesEnabled,
+    revisionLifecycleCallbacks,
+  );
 
   const publishDocument = useCallback(
     (editorInstance: NonNullable<ReturnType<typeof useEditor>>, nextRevision: number) => {
-      onDocumentChange(serializeDocument(editorInstance, title, nextRevision));
+      onDocumentChange(serializeDocument(editorInstance, title, nextRevision, document.documentId));
     },
-    [onDocumentChange, title],
+    [document.documentId, onDocumentChange, title],
   );
 
   const editor = useEditor({
@@ -157,8 +172,12 @@ export function DocumentWorkspace({
         revision: request.revision,
         count: resolvedCount,
       });
+      onStudyEvent?.(
+        request.type === "transition" ? "transition_highlight_applied" : "repetition_highlight_applied",
+        request.type === "transition" ? { category: request.key } : { term: request.key },
+      );
     },
-    [activeAnalyticsHighlight, clearActiveAnalyticsHighlights, document.revision, editor],
+    [activeAnalyticsHighlight, clearActiveAnalyticsHighlights, document.revision, editor, onStudyEvent],
   );
 
   useEffect(() => {
@@ -197,8 +216,12 @@ export function DocumentWorkspace({
 
       scrollElementIntoPageStage(targetElement, pageStageRef.current);
       showNavigationHighlight(targetElement, highlightedNodeRef, highlightTimerRef);
+      onStudyEvent?.(
+        expectedType === "paragraph" ? "paragraph_navigation_used" : "structure_navigation_used",
+        expectedType === "paragraph" ? { paragraphId: nodeId } : { headingId: nodeId },
+      );
     },
-    [editor],
+    [editor, onStudyEvent],
   );
 
   const acceptParagraphRevision = useCallback(
@@ -223,7 +246,7 @@ export function DocumentWorkspace({
   );
 
   return (
-    <main className="workspace-grid">
+    <main className={aiFeaturesEnabled ? "workspace-grid" : "workspace-grid analytics-only"}>
       <aside className={leftPanelOpen ? "side-panel left-panel" : "side-panel left-panel collapsed"}>
         <button
           className="panel-toggle"
@@ -240,8 +263,11 @@ export function DocumentWorkspace({
             revision={revisionRef.current}
             selectedParagraph={selectedParagraph}
             selectedParagraphId={selection.paragraphId}
+            aiFeaturesEnabled={aiFeaturesEnabled}
             activeAnalyticsHighlight={activeAnalyticsHighlight}
             sentenceRevisionState={aiPanelRevisionState}
+            revisionLifecycleCallbacks={revisionLifecycleCallbacks}
+            onStudyEvent={onStudyEvent}
             onAcceptRevision={acceptParagraphRevision}
             onNavigateToParagraph={(paragraphId) => navigateToDocumentNode(paragraphId, "paragraph")}
             onNavigateToHeading={(headingId) => navigateToDocumentNode(headingId, "heading")}
@@ -269,25 +295,28 @@ export function DocumentWorkspace({
         </footer>
       </section>
 
-      <aside className={rightPanelOpen ? "side-panel right-panel" : "side-panel right-panel collapsed"}>
-        <button
-          className="panel-toggle"
-          type="button"
-          onClick={onToggleRightPanel}
-          aria-expanded={rightPanelOpen}
-        >
-          {rightPanelOpen ? ">" : "<"}
-        </button>
-        {rightPanelOpen && (
-          <AiWritingPanel
-            document={document}
-            selectedParagraph={selectedParagraph}
-            selectedParagraphId={selection.paragraphId}
-            onAcceptRevision={acceptParagraphRevision}
-            revisionState={aiPanelRevisionState}
-          />
-        )}
-      </aside>
+      {aiFeaturesEnabled && (
+        <aside className={rightPanelOpen ? "side-panel right-panel" : "side-panel right-panel collapsed"}>
+          <button
+            className="panel-toggle"
+            type="button"
+            onClick={onToggleRightPanel}
+            aria-expanded={rightPanelOpen}
+          >
+            {rightPanelOpen ? ">" : "<"}
+          </button>
+          {rightPanelOpen && (
+            <AiWritingPanel
+              document={document}
+              selectedParagraph={selectedParagraph}
+              selectedParagraphId={selection.paragraphId}
+              onAcceptRevision={acceptParagraphRevision}
+              revisionState={aiPanelRevisionState}
+              onStudyEvent={onStudyEvent}
+            />
+          )}
+        </aside>
+      )}
     </main>
   );
 }

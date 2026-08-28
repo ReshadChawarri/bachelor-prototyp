@@ -12,6 +12,7 @@ import type {
 } from "../types/backendAnalytics";
 import type { DocumentModel, ParagraphBlock } from "../types/document";
 import type { ParagraphRevisionApplyResult } from "../editor/revision";
+import type { StudyEventLogger } from "../study/types";
 
 vi.mock("../api/aiAnalysis", () => ({
   suggestRevision: vi.fn(),
@@ -166,24 +167,28 @@ function renderPanel({
   selectedParagraph = TEST_DOCUMENT.paragraphs[1],
   selectedParagraphId = "p-stable-2",
   backendAnalytics = backendState(),
+  aiFeaturesEnabled = true,
   onNavigateToParagraph,
   onNavigateToHeading,
   activeAnalyticsHighlight,
   onToggleAnalyticsHighlight,
   onClearAnalyticsHighlights,
   onAcceptRevision,
+  onStudyEvent,
 }: {
   document?: DocumentModel;
   revision?: number;
   selectedParagraph?: ParagraphBlock;
   selectedParagraphId?: string | null;
   backendAnalytics?: BackendAnalyticsState;
+  aiFeaturesEnabled?: boolean;
   onNavigateToParagraph?: (paragraphId: string) => void;
   onNavigateToHeading?: (headingId: string) => void;
   activeAnalyticsHighlight?: ActiveAnalyticsHighlight | null;
   onToggleAnalyticsHighlight?: (request: AnalyticsHighlightRequest) => void;
   onClearAnalyticsHighlights?: () => void;
   onAcceptRevision?: (suggestion: SuggestRevisionResponse) => ParagraphRevisionApplyResult;
+  onStudyEvent?: StudyEventLogger;
 } = {}) {
   return render(
     <WritingAnalyticsPanel
@@ -192,12 +197,14 @@ function renderPanel({
       revision={revision}
       selectedParagraph={selectedParagraph}
       selectedParagraphId={selectedParagraphId}
+      aiFeaturesEnabled={aiFeaturesEnabled}
       activeAnalyticsHighlight={activeAnalyticsHighlight}
       onAcceptRevision={onAcceptRevision}
       onNavigateToParagraph={onNavigateToParagraph}
       onNavigateToHeading={onNavigateToHeading}
       onToggleAnalyticsHighlight={onToggleAnalyticsHighlight}
       onClearAnalyticsHighlights={onClearAnalyticsHighlights}
+      onStudyEvent={onStudyEvent}
     />,
   );
 }
@@ -809,6 +816,115 @@ describe("WritingAnalyticsPanel paragraph length focus", () => {
       },
     });
     expect(screen.queryByText("Revision Suggestion")).not.toBeInTheDocument();
+  });
+});
+
+describe("WritingAnalyticsPanel Study Mode instrumentation", () => {
+  beforeEach(() => {
+    mockedSuggestRevision.mockImplementation(async (request) => revisionResponseFor(request));
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("keeps deterministic analytics visible but removes AI revision controls when AI features are disabled", () => {
+    renderPanel({ aiFeaturesEnabled: false });
+
+    expect(screen.getByText("Writing Analytics")).toBeInTheDocument();
+    expect(screen.getByText("Overview")).toBeInTheDocument();
+    expect(screen.getByText("Paragraph Length")).toBeInTheDocument();
+    expect(screen.getByText("Sentence Length")).toBeInTheDocument();
+    expect(screen.queryByRole("slider", { name: "Target length in words" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Generate revision" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Make sentences more concise" })).not.toBeInTheDocument();
+    expect(mockedSuggestRevision).not.toHaveBeenCalled();
+  });
+
+  it("logs analytics section expansion only when a collapsed section is opened", async () => {
+    const user = userEvent.setup();
+    const onStudyEvent = vi.fn<StudyEventLogger>();
+    renderPanel({ onStudyEvent });
+
+    await user.click(screen.getByRole("button", { name: "All paragraphs (3)" }));
+    await user.click(screen.getByRole("button", { name: "Document distribution" }));
+    await user.click(screen.getByRole("button", { name: "Show categories" }));
+    await user.click(screen.getByRole("button", { name: "Show repeated terms" }));
+    await user.click(screen.getByRole("button", { name: "Show structure" }));
+    await user.click(screen.getByRole("button", { name: "Show structure" }));
+
+    expect(onStudyEvent).toHaveBeenCalledWith("analytics_section_expanded", { section: "paragraph_length" });
+    expect(onStudyEvent).toHaveBeenCalledWith("analytics_section_expanded", { section: "sentence_length" });
+    expect(onStudyEvent).toHaveBeenCalledWith("analytics_section_expanded", { section: "transition_words" });
+    expect(onStudyEvent).toHaveBeenCalledWith("analytics_section_expanded", { section: "repetition" });
+    expect(onStudyEvent).toHaveBeenCalledWith("analytics_section_expanded", { section: "document_structure" });
+    expect(onStudyEvent).toHaveBeenCalledTimes(5);
+  });
+
+  it("preserves highlight and navigation interactions while exposing study event hooks", async () => {
+    const user = userEvent.setup();
+    const onToggleAnalyticsHighlight = vi.fn();
+    const onNavigateToParagraph = vi.fn();
+    const onNavigateToHeading = vi.fn();
+    const onStudyEvent = vi.fn<StudyEventLogger>();
+    renderPanel({
+      onToggleAnalyticsHighlight,
+      onNavigateToParagraph,
+      onNavigateToHeading,
+      onStudyEvent,
+    });
+
+    await user.click(screen.getByRole("button", { name: "All paragraphs (3)" }));
+    await user.click(screen.getByRole("button", { name: /P1 3/ }));
+    await user.click(screen.getByRole("button", { name: "Show categories" }));
+    await user.click(screen.getByRole("button", { name: /Highlight 3 Addition/ }));
+    await user.click(screen.getByRole("button", { name: "Show repeated terms" }));
+    await user.click(screen.getByRole("button", { name: /Highlight 4 occurrences of writing/ }));
+    await user.click(screen.getByRole("button", { name: "Show structure" }));
+    await user.click(screen.getByRole("button", { name: "2.1 Participants" }));
+
+    expect(onNavigateToParagraph).toHaveBeenCalledWith("p-stable-1");
+    expect(onToggleAnalyticsHighlight).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "transition", key: "Addition" }),
+    );
+    expect(onToggleAnalyticsHighlight).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "repetition", key: "writing" }),
+    );
+    expect(onNavigateToHeading).toHaveBeenCalledWith("h2");
+    expect(onStudyEvent).toHaveBeenCalledWith("analytics_section_expanded", { section: "paragraph_length" });
+  });
+
+  it("logs paragraph and sentence revision requests without source text", async () => {
+    const user = userEvent.setup();
+    const onStudyEvent = vi.fn<StudyEventLogger>();
+    renderPanel({
+      document: LONG_DOCUMENT,
+      selectedParagraph: LONG_DOCUMENT.paragraphs[0],
+      selectedParagraphId: "p-long-1",
+      backendAnalytics: backendState({ data: { ...BACKEND_RESPONSE, revision: LONG_DOCUMENT.revision } }),
+      onStudyEvent,
+    });
+
+    fireEvent.change(screen.getByRole("slider", { name: "Target length in words" }), { target: { value: "60" } });
+    await user.click(screen.getByRole("button", { name: "Generate revision" }));
+    await user.click(screen.getByRole("button", { name: "Make sentences more concise" }));
+
+    expect(onStudyEvent).toHaveBeenCalledWith("revision_requested", {
+      paragraphId: "p-long-1",
+      action: "adjust_paragraph_length",
+      currentWordCount: 80,
+      targetWordCount: 60,
+    });
+    expect(onStudyEvent).toHaveBeenCalledWith(
+      "revision_requested",
+      expect.objectContaining({
+        paragraphId: "p-long-1",
+        action: "improve_sentence_length",
+        originalAverageSentenceLength: expect.any(Number),
+        originalVeryLongSentenceCount: expect.any(Number),
+      }),
+    );
+    expect(JSON.stringify(onStudyEvent.mock.calls)).not.toContain("alpha1 alpha2");
   });
 });
 

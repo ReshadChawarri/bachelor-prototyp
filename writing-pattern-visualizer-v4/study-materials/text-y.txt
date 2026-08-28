@@ -1,0 +1,11 @@
+Text Y Placeholder
+
+1 Background
+
+This placeholder text represents the second academic study material for the evaluation. The researcher can replace the body with the final Text Y while keeping the filename stable.
+
+Each task starts from this master copy and writes participant edits to a separate local output file. The application must not reuse edits from previous study sessions.
+
+2 Reflection
+
+The final version of Text Y should be comparable in scope to Text X according to the study design. This placeholder exists only to keep Study Mode operational before the final materials are inserted.
