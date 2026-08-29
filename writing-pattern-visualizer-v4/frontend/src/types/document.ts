@@ -31,6 +31,7 @@ export interface EditorSelection {
 export interface ImportedContentBlock {
   kind: ImportedBlockKind;
   text: string;
+  paragraph_id?: string;
   heading_level?: number | null;
   spans?: TextSpan[];
   rows?: string[][] | null;

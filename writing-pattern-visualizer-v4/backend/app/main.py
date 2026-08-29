@@ -22,15 +22,19 @@ from .paragraph_revision import (
 from .pdf_import import PdfImportError, PdfImportResponse, extract_pdf_content
 from .study import (
     StudyDataError,
-    StudyEventRequest,
     StudyEventResponse,
-    StudyTaskConfig,
-    StudyTaskFinishRequest,
+    StudyTaskCompletedError,
     StudyTaskFinishResponse,
-    StudyTaskStartResponse,
-    finish_study_task,
-    log_study_event,
-    start_study_task,
+    StudyTaskStateError,
+    StudyTokenError,
+    RemoteStudyEventRequest,
+    RemoteStudyTaskFinishRequest,
+    RemoteStudyTaskStartResponse,
+    RemoteStudyTaskStatusResponse,
+    finish_remote_study_task,
+    get_remote_study_task_status,
+    log_remote_study_event,
+    start_remote_study_task,
 )
 
 
@@ -48,12 +52,11 @@ app = FastAPI(
     description="Backend for the V4 writing workspace, deterministic analytics, paragraph AI support, and Study Mode.",
 )
 
+settings = get_settings()
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=list(settings.cors_allowed_origins),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -114,27 +117,49 @@ def suggest_revision(request: ParagraphRevisionRequest) -> ParagraphRevisionResp
         raise HTTPException(status_code=exc.status_code, detail=exc.user_message) from exc
 
 
-@app.post("/api/study/tasks/start", response_model=StudyTaskStartResponse)
-def study_task_start(request: StudyTaskConfig) -> StudyTaskStartResponse:
+@app.get("/api/study/tasks/{token}", response_model=RemoteStudyTaskStatusResponse)
+def remote_study_task_status(token: str) -> RemoteStudyTaskStatusResponse:
     try:
-        return start_study_task(request)
+        return get_remote_study_task_status(token)
+    except StudyTokenError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except StudyDataError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@app.post("/api/study/events", response_model=StudyEventResponse)
-def study_event(request: StudyEventRequest) -> StudyEventResponse:
+@app.post("/api/study/tasks/{token}/start", response_model=RemoteStudyTaskStartResponse)
+def remote_study_task_start(token: str) -> RemoteStudyTaskStartResponse:
     try:
-        return log_study_event(request)
+        return start_remote_study_task(token)
+    except StudyTokenError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except StudyTaskCompletedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except StudyDataError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/study/tasks/{token}/events", response_model=StudyEventResponse)
+def remote_study_event(token: str, request: RemoteStudyEventRequest) -> StudyEventResponse:
+    try:
+        return log_remote_study_event(token, request)
+    except StudyTokenError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except StudyTaskStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@app.post("/api/study/tasks/finish", response_model=StudyTaskFinishResponse)
-def study_task_finish(request: StudyTaskFinishRequest) -> StudyTaskFinishResponse:
+@app.post("/api/study/tasks/{token}/finish", response_model=StudyTaskFinishResponse)
+def remote_study_task_finish(token: str, request: RemoteStudyTaskFinishRequest) -> StudyTaskFinishResponse:
     try:
-        return finish_study_task(request)
-    except StudyDataError as exc:
+        return finish_remote_study_task(token, request)
+    except StudyTokenError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except StudyTaskStateError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except StudyDataError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
