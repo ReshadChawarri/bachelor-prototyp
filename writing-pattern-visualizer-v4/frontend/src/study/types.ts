@@ -1,23 +1,25 @@
 export const STUDY_VERSION = "1.0";
 
 export type StudyCondition = "A" | "B";
-export type StudyTextId = "X" | "Y";
-export type StudyTaskOrder = 1 | 2;
+export type StudyTaskStatus = "unused" | "active" | "completed";
 
-export interface StudyTaskConfig {
-  participantId: string;
+export interface RemoteStudyClientTask {
+  token: string;
+  status: "active";
   condition: StudyCondition;
-  textId: StudyTextId;
-  taskOrder: StudyTaskOrder;
-}
-
-export interface StudyTaskContext extends StudyTaskConfig {
-  sessionId: string;
+  documentId: string;
   studyVersion: typeof STUDY_VERSION;
 }
 
+export interface RemoteStudyTaskStatusResponse {
+  status: StudyTaskStatus;
+  task: RemoteStudyClientTask | null;
+  studyText: string | null;
+  filename: string | null;
+}
+
 export interface StudyTaskStartResponse {
-  task: StudyTaskContext;
+  task: RemoteStudyClientTask;
   studyText: string;
   filename: string;
 }
@@ -47,7 +49,7 @@ export type RevisionFailureCategory =
 export type StudyEventPayload = Record<string, unknown>;
 
 export interface StudyEventRequest {
-  task: StudyTaskContext;
+  eventId: string;
   sequenceNumber: number;
   event: StudyEventType;
   payload: StudyEventPayload;
@@ -62,7 +64,8 @@ export interface TaskRevisionSummary {
 }
 
 export interface StudyTaskFinishRequest {
-  task: StudyTaskContext;
+  summaryEventId: string;
+  finishedEventId: string;
   summarySequenceNumber: number;
   finishedSequenceNumber: number;
   finalText: string;
@@ -71,8 +74,7 @@ export interface StudyTaskFinishRequest {
 
 export interface StudyTaskFinishResponse {
   ok: boolean;
-  finalTextPath: string;
-  logPath: string;
+  status: "completed";
 }
 
 export type StudyEventLogger = (event: StudyEventType, payload?: StudyEventPayload) => void;

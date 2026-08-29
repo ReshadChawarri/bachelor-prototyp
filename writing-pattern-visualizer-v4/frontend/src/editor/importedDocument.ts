@@ -16,7 +16,7 @@ function blockToTipTapNodes(block: ImportedContentBlock): JSONContent[] {
         type: "heading",
         attrs: {
           level: normalizeHeadingLevel(block.heading_level),
-          paragraphId: createParagraphId(),
+          paragraphId: block.paragraph_id ?? createParagraphId(),
           blockType: "heading",
         },
         content: spanContent(block),
@@ -34,7 +34,7 @@ function blockToTipTapNodes(block: ImportedContentBlock): JSONContent[] {
             content: [
               {
                 type: "paragraph",
-                attrs: { paragraphId: createParagraphId(), blockType: "list" },
+                attrs: { paragraphId: block.paragraph_id ?? createParagraphId(), blockType: "list" },
                 content: spanContent(block),
               },
             ],
@@ -47,7 +47,7 @@ function blockToTipTapNodes(block: ImportedContentBlock): JSONContent[] {
   return [
     {
       type: "paragraph",
-      attrs: { paragraphId: createParagraphId(), blockType: block.kind },
+      attrs: { paragraphId: block.paragraph_id ?? createParagraphId(), blockType: block.kind },
       content: spanContent(block),
     },
   ];

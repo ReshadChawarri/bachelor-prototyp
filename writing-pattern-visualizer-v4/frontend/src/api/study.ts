@@ -1,6 +1,6 @@
 import type {
+  RemoteStudyTaskStatusResponse,
   StudyEventRequest,
-  StudyTaskConfig,
   StudyTaskFinishRequest,
   StudyTaskFinishResponse,
   StudyTaskStartResponse,
@@ -12,13 +12,19 @@ interface ApiErrorBody {
   detail?: string;
 }
 
-export async function startStudyTask(config: StudyTaskConfig): Promise<StudyTaskStartResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/study/tasks/start`, {
+export async function fetchStudyTaskStatus(token: string): Promise<RemoteStudyTaskStatusResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/study/tasks/${encodeURIComponent(token)}`);
+
+  if (!response.ok) {
+    throw new Error(await errorMessage(response, "This study link is not valid."));
+  }
+
+  return response.json() as Promise<RemoteStudyTaskStatusResponse>;
+}
+
+export async function startStudyTask(token: string): Promise<StudyTaskStartResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/study/tasks/${encodeURIComponent(token)}/start`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(config),
   });
 
   if (!response.ok) {
@@ -28,8 +34,8 @@ export async function startStudyTask(config: StudyTaskConfig): Promise<StudyTask
   return response.json() as Promise<StudyTaskStartResponse>;
 }
 
-export async function logStudyEvent(request: StudyEventRequest): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/api/study/events`, {
+export async function logStudyEvent(token: string, request: StudyEventRequest): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/study/tasks/${encodeURIComponent(token)}/events`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -42,8 +48,8 @@ export async function logStudyEvent(request: StudyEventRequest): Promise<void> {
   }
 }
 
-export async function finishStudyTask(request: StudyTaskFinishRequest): Promise<StudyTaskFinishResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/study/tasks/finish`, {
+export async function finishStudyTask(token: string, request: StudyTaskFinishRequest): Promise<StudyTaskFinishResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/study/tasks/${encodeURIComponent(token)}/finish`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

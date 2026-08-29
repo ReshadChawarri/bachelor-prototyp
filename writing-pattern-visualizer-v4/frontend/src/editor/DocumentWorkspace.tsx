@@ -62,7 +62,7 @@ export function DocumentWorkspace({
   onToggleLeftPanel,
   onToggleRightPanel,
 }: DocumentWorkspaceProps) {
-  const revisionRef = useRef(0);
+  const revisionRef = useRef(document.revision);
   const pageStageRef = useRef<HTMLDivElement | null>(null);
   const highlightedNodeRef = useRef<HTMLElement | null>(null);
   const highlightTimerRef = useRef<number | null>(null);

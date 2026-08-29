@@ -212,6 +212,22 @@ class ParagraphAIAnalysisServiceTests(unittest.TestCase):
         self.assertEqual(settings.openai_api_key, "sk-test-placeholder")
         self.assertEqual(settings.openai_model, "gpt-test-model")
 
+    def test_settings_parse_remote_study_storage_and_cors_origins(self):
+        with patch.dict(
+            os.environ,
+            {
+                "STUDY_DATA_DIR": "/tmp/wpv-study-data",
+                "STUDY_PUBLIC_BASE_URL": "https://study.example",
+                "CORS_ALLOWED_ORIGINS": "https://study.example, https://api.study.example ",
+            },
+            clear=False,
+        ):
+            settings = get_settings()
+
+        self.assertEqual(str(settings.study_data_dir), "/tmp/wpv-study-data")
+        self.assertEqual(settings.study_public_base_url, "https://study.example")
+        self.assertEqual(settings.cors_allowed_origins, ("https://study.example", "https://api.study.example"))
+
     def test_configured_model_is_used(self):
         request = ParagraphAnalysisRequest.model_validate(request_payload())
         fake_raw_client = FakeOpenAIClient(valid_analysis())
