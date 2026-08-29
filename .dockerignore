@@ -1,0 +1,30 @@
+.git
+
+# Environment / secrets
+**/.env
+**/.env.*
+!**/.env.example
+
+# Python
+**/.venv
+**/venv
+**/__pycache__/
+**/*pycache*
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/*.py[cod]
+
+# Node / React / Vite
+**/node_modules
+**/dist
+**/build
+**/.vite
+
+# Study data and participant output
+**/study-data
+
+# Logs / OS
+**/*.log
+.DS_Store
+**/.DS_Store
